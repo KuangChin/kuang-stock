@@ -44,7 +44,7 @@ export const routes = {
     if (body.fees) c.fees = { ...c.fees, ...body.fees };
     if (Array.isArray(body.watchlist)) c.watchlist = [...new Set(body.watchlist.map(String).filter((x) => /^\d{4,6}$/.test(x)))];
     addLog("設定已更新");
-    await saveState();
+    await saveState(["config", "log"]);
     return publicState();
   },
   "POST /api/portfolio/reset": async (u, body) => { await resetState(body); addLog(`帳戶重設：現金 ${body.cash}，持股 ${(body.positions || []).length} 檔`); return publicState(); },
@@ -56,7 +56,7 @@ export const routes = {
     const r = executeOrder(s, { symbol: body.symbol, side: body.side, shares: body.shares, price, name: q?.name, reason: body.reason || "手動下單", source: "manual" });
     if (r.error) throw new HttpError(400, r.error);
     addLog(`手動 ${body.side} ${body.symbol} ${body.shares} 股 @ ${price}`);
-    await saveState();
+    await saveState(["cash", "positions", "trades", "log"]);
     return { trade: r.trade, state: publicState() };
   },
   /**
@@ -86,13 +86,13 @@ export const routes = {
       const keep = { oddLot: s.config.risk.oddLot, minCashPct: s.config.risk.minCashPct, minOrderAmount: s.config.risk.minOrderAmount, maxPositions: s.config.risk.maxPositions };
       s.config.risk = { ...s.config.risk, ...r.best.risk, ...keep };
       addLog(`自動調參完成：回測 ${r.tried} 組，套用最佳參數（報酬 ${r.best.returnPct}%，回撤 ${r.best.maxDrawdownPct}%，原參數報酬 ${r.current.returnPct}%）`);
-      await saveState();
+      await saveState(["config", "log"]);
     }
     return { ...r, state: publicState() };
   },
   // ---------- 投資長對話 ----------
   "GET /api/chat": async () => ({ messages: getState().chat || [], aiAvailable: aiAvailable() }),
-  "POST /api/chat/clear": async () => { const s = getState(); s.chat = []; await saveState(); return { ok: true }; },
+  "POST /api/chat/clear": async () => { const s = getState(); s.chat = []; await saveState(["chat"]); return { ok: true }; },
   /** 串流（SSE）：data: {"delta":"..."} ... data: {"done":true,...} */
   "POST /api/chat": async (u, body) => {
     const s = getState();
@@ -115,11 +115,11 @@ export const routes = {
         }
         s.chat.push({ role: "assistant", content: text, t: new Date().toISOString(), model: meta?.model, usage: meta?.usage && { in: meta.usage.input_tokens, out: meta.usage.output_tokens, cached: meta.usage.cache_read_input_tokens } });
         if (s.chat.length > CHAT_MAX * 2) s.chat.splice(0, s.chat.length - CHAT_MAX * 2);
-        await saveState();
+        await saveState(["chat"]);
         yield { done: true, usage: meta?.usage, model: meta?.model };
       } catch (e) {
         s.chat.pop(); // 失敗就不留這則提問
-        await saveState().catch(() => {});
+        await saveState(["chat"]).catch(() => {});
         yield { error: e.message };
       }
     }
@@ -172,7 +172,11 @@ export async function handleApi(req) {
     return { status: 200, headers, body };
   } catch (e) {
     const status = e instanceof HttpError ? e.status : 500;
-    if (status === 500) console.error(key, e);
+    if (status === 500) {
+      console.error(key, e);
+      // 讓失敗出現在頁面的系統日誌，雲端沒有 console 可看
+      try { if (getState()) { addLog(`${key} 失敗：${e.message}`, "error"); await saveState(["log"]); } } catch {}
+    }
     return { status, headers, body: { error: e.message } };
   }
 }

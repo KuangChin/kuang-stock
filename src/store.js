@@ -48,8 +48,19 @@ export async function loadState({ fresh = false } = {}) {
   return state;
 }
 
-export async function saveState() {
-  await storage.set(KEY, state);
+/**
+ * 儲存。fields 給了就只寫這些欄位：先讀回儲存層的最新版，覆蓋指定欄位再存回，
+ * 避免雲端上同時進行的請求（例如對話與分析）互相把對方的結果蓋掉。
+ * 本機檔案模式是單一程序，直接整份寫。
+ */
+export async function saveState(fields = null) {
+  if (!fields || storage.name === "file") { await storage.set(KEY, state); return; }
+  const cur = await storage.get(KEY);
+  if (!cur) { await storage.set(KEY, state); return; }
+  for (const f of fields) cur[f] = state[f];
+  // 其他欄位以儲存層為準，同步回記憶體，讓這個請求後續讀到的也是最新的
+  for (const k of Object.keys(cur)) if (!fields.includes(k)) state[k] = cur[k];
+  await storage.set(KEY, cur);
 }
 
 export function getState() {

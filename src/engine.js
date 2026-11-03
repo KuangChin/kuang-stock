@@ -147,7 +147,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
       analyses: Object.fromEntries(Object.values(analyses).map((a) => [a.symbol, { symbol: a.symbol, name: a.name, price: a.price, changePct: a.changePct, quote: a.quote && { bestAsk: a.quote.bestAsk, bestBid: a.quote.bestBid, volume: a.quote.volume, time: a.quote.time, high: a.quote.high, low: a.quote.low, open: a.quote.open, prevClose: a.quote.prevClose }, indicators: a.indicators, score: a.score, reasons: a.reasons, analysts: a.analysts, sentiment: a.sentiment, news: a.news.slice(0, 8) }])),
       valuation: val2, trades: executed,
     };
-    await saveState();
+    await saveState(["cash", "positions", "trades", "equity", "lastCycle", "log"]);
     return state.lastCycle;
   })().finally(() => { running = null; });
   return running;
@@ -186,7 +186,7 @@ export async function autoTick({ wait = false } = {}) {
     if (Date.now() - last < cfg.intervalMin * 60 * 1000 - 15 * 1000) return { ran: false, reason: `距上次自動輪次未滿 ${cfg.intervalMin} 分鐘` };
     if (!(await storage.lock("cycle", 240))) return { ran: false, reason: "另一個實例正在執行" };
     state.lastAutoRun = new Date().toISOString();
-    await saveState();
+    await saveState(["lastAutoRun", "log"]);
     const p = runCycle({ execute: true, source: "auto" }).catch((e) => addLog("自動輪次失敗：" + e.message, "error")).finally(() => storage.unlock("cycle").catch(() => {}));
     return { ran: true, reason: "盤中自動輪次", cycle: wait ? await p : undefined };
   }
@@ -195,7 +195,7 @@ export async function autoTick({ wait = false } = {}) {
     if (!(await storage.lock(`close:${today}`, 6 * 3600))) return { ran: false, reason: "收盤輪次已由其他實例執行" };
     // 先記錄再執行：伺服器重啟或排程補跑都不會重複
     state.lastAutoClose = today;
-    await saveState();
+    await saveState(["lastAutoClose", "log"]);
     const p = runCycle({ execute: true, source: "auto-close" }).catch((e) => addLog("收盤輪次失敗：" + e.message, "error"));
     return { ran: true, reason: "收盤輪次", cycle: wait ? await p : undefined };
   }
