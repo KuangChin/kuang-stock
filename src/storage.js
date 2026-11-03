@@ -17,7 +17,8 @@ function redisConfig() {
 }
 
 export const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-export const backend = redisConfig() ? "redis" : "file";
+// 雲端沒有 Redis 時用記憶體（function 重啟就消失，只能暫時看畫面），避免寫唯讀磁碟直接炸掉
+export const backend = redisConfig() ? "redis" : isServerless ? "memory" : "file";
 
 // ---------- Redis REST（Upstash），不另外裝套件 ----------
 async function redis(cmd) {
@@ -91,4 +92,17 @@ const fileAdapter = {
   },
 };
 
-export const storage = backend === "redis" ? redisAdapter : fileAdapter;
+// ---------- 記憶體（雲端未接 Redis 的過渡） ----------
+const mem = new Map();
+const memoryAdapter = {
+  name: "memory",
+  async get(key) { const w = mem.get(key); return w && (!w.exp || w.exp > Date.now()) ? JSON.parse(w.v) : null; },
+  async set(key, value, { ttlSec } = {}) { mem.set(key, { v: JSON.stringify(value), exp: ttlSec ? Date.now() + ttlSec * 1000 : null }); },
+  async del(key) { mem.delete(key); },
+  async lock(key, ttlSec) { if (await this.get(`lock:${key}`)) return false; await this.set(`lock:${key}`, 1, { ttlSec }); return true; },
+  async unlock(key) { mem.delete(`lock:${key}`); },
+  async cacheGet(key, maxAgeMs) { const w = await this.get(`cache:${key}`); return w && (maxAgeMs == null || Date.now() - w.t <= maxAgeMs) ? w.v : null; },
+  async cacheSet(key, value) { await this.set(`cache:${key}`, { t: Date.now(), v: value }); },
+};
+
+export const storage = backend === "redis" ? redisAdapter : backend === "memory" ? memoryAdapter : fileAdapter;

@@ -100,7 +100,7 @@ node src/cli.js backtest 2330,2317,2454 1000000 120
 ### 驗收
 
 ```bash
-curl -s https://<app>/api/health                                    # {"ok":true,"backend":"redis","serverless":true}
+curl -s "https://<app>/api/health?probe=1"   # backend 要是 "redis"（"memory" 代表 Redis 還沒接，資料不會保存）；twse 要是 "ok ..."
 curl -s -X POST https://<app>/api/cycle -H "Authorization: Bearer <CRON_SECRET>" -d '{}'
 #   盤後回 {"ran":false,"reason":"今日收盤輪次已執行"} 或 "非交易時段" 都算正常；盤中會真的跑一輪
 curl -s https://<app>/api/quotes?symbols=2330 --cookie "ks_session=..."   # 確認證交所從 Vercel 抓得到

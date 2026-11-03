@@ -25,7 +25,7 @@ code { font-size: 12px; background: var(--neutral); padding: 1px 4px; border-rad
 .topbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; gap: 12px; flex-wrap: wrap; }
 .status { font-size: 12px; color: var(--ink-2); margin-top: 2px; display: flex; gap: 8px; align-items: center; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--neutral); font-size: 11px; }
-.badge.open { background: var(--good); color: #fff; } .badge.on { background: var(--s1); color: #fff; }
+.badge.open { background: var(--good); color: #fff; } .badge.on { background: var(--s1); color: #fff; } .badge.warn { background: var(--warn); color: #222; }
 .actions { display: flex; gap: 8px; }
 .btn { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer; }
 .btn:hover { border-color: var(--axis); } .btn.primary { background: var(--s1); color: #fff; border-color: transparent; } .btn.ghost { background: transparent; }

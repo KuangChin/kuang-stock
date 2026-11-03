@@ -13,7 +13,9 @@ let busy = false;
 async function api(path, body) {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (r.status === 401) { location.href = "/login.html"; throw new Error("請先登入"); }
-  const j = await r.json();
+  const text = await r.text();
+  let j;
+  try { j = JSON.parse(text); } catch { throw new Error(`伺服器回應不是 JSON（HTTP ${r.status}）：${text.replace(/<[^>]+>/g, " ").trim().slice(0, 160)}`); }
   if (!r.ok || j.error) throw new Error(j.error || r.statusText);
   return j;
 }
@@ -24,6 +26,8 @@ function setBusy(b) { busy = b; $$("#btnAnalyze,#btnRun").forEach((x) => (x.disa
 function tile(label, value, delta = "", c = "") { return `<div class="tile"><div class="label">${label}</div><div class="value ${c}">${value}</div><div class="delta ${c}">${delta}</div></div>`; }
 
 function render() {
+  const sw = $("#storageWarn");
+  if (S.runtime?.backend === "memory") { sw.textContent = "尚未連接 Redis：資料不會保存"; sw.classList.remove("hidden"); } else sw.classList.add("hidden");
   const lc = S.lastCycle, v = lc?.valuation;
   $("#clock").textContent = S.now;
   const mb = $("#marketBadge"); mb.textContent = S.marketOpen ? "盤中" : "盤後"; mb.className = "badge " + (S.marketOpen ? "open" : "");

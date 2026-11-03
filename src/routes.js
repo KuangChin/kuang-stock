@@ -97,7 +97,17 @@ export const routes = {
     return { ok: true, auth: true };
   },
   "POST /api/logout": async (u, body, ctx) => { ctx.setHeader("Set-Cookie", clearCookie()); return { ok: true }; },
-  "GET /api/health": async () => ({ ok: true, time: taipeiNow(), backend, serverless: isServerless }),
+  // 不用登入；順便探測證交所是否能從這個機房連到（部署後驗收用）
+  "GET /api/health": async (u) => {
+    const out = { ok: true, time: taipeiNow(), backend, serverless: isServerless, auth: authEnabled(), cron: Boolean(process.env.CRON_SECRET) };
+    if (u.searchParams.has("probe")) {
+      const t0 = Date.now();
+      try { const q = (await getQuotes(["2330"]))["2330"]; out.twse = q?.price ? `ok ${q.name} ${q.price}` : "no data"; }
+      catch (e) { out.twse = "fail: " + e.message; }
+      out.twseMs = Date.now() - t0;
+    }
+    return out;
+  },
 };
 
 /**
