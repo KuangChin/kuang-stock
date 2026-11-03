@@ -112,6 +112,22 @@ details { margin: 14px 0; } summary { cursor: pointer; font-size: 13px; padding:
 
 tr.sub { display: none; }   /* 手機版才顯示的理由列 */
 
+/* ---------- 投資長對話 ---------- */
+.fab { position: fixed; right: 18px; bottom: 18px; z-index: 15; border: 0; border-radius: 24px; padding: 10px 16px; background: var(--s1); color: #fff; font: inherit; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: pointer; }
+.chat-panel { display: flex; flex-direction: column; }
+.chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 6px 0 12px; }
+.msg { max-width: 92%; padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: var(--s1); color: #fff; border-bottom-right-radius: 4px; }
+.msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg.assistant.typing::after { content: "▍"; animation: blink 1s steps(2) infinite; color: var(--muted); }
+.msg ul { margin: 4px 0; padding-left: 18px; } .msg li { margin: 2px 0; }
+.msg .meta { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; white-space: normal; }
+.msg.user .meta { color: rgba(255,255,255,.75); }
+@keyframes blink { to { opacity: 0; } }
+.chat-form { display: flex; gap: 8px; align-items: flex-end; border-top: 1px solid var(--border); padding-top: 10px; }
+.chat-form textarea { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--axis); border-radius: 8px; background: var(--surface); color: var(--ink); resize: none; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+
 /* ---------- 手機版 ---------- */
 .col-main, .col-side, .cm-left, .cm-right { min-width: 0; }   /* 讓表格在格子內捲動，不把整頁撐寬 */
 @media (max-width: 700px) {
@@ -137,6 +153,9 @@ tr.sub { display: none; }   /* 手機版才顯示的理由列 */
   th, td { padding: 6px 6px; }
   .inline-form input[name=symbols] { width: 100%; }
   .drawer-panel { padding: 12px 12px 40px; }
+  .chat-panel { padding-bottom: 12px; }
+  .fab { right: 12px; bottom: 12px; padding: 9px 14px; }
+  .msg { max-width: 96%; }
   .param-grid { grid-template-columns: 1fr; }
   #posEdit input { width: 80px; }
 }

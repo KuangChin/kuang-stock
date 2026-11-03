@@ -7,6 +7,7 @@ import { tuneRisk } from "./tuner.js";
 import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow } from "./twse.js";
 import { executeOrder, valuation } from "./portfolio.js";
 import { aiAvailable } from "./analyst.js";
+import { chatStream, CHAT_MAX } from "./chat.js";
 import { storage, isServerless, backend } from "./storage.js";
 import { authEnabled, verifySession, verifyCron, checkPassword, issueSession, sessionCookie, clearCookie, parseCookies, COOKIE } from "./auth.js";
 
@@ -89,6 +90,41 @@ export const routes = {
     }
     return { ...r, state: publicState() };
   },
+  // ---------- 投資長對話 ----------
+  "GET /api/chat": async () => ({ messages: getState().chat || [], aiAvailable: aiAvailable() }),
+  "POST /api/chat/clear": async () => { const s = getState(); s.chat = []; await saveState(); return { ok: true }; },
+  /** 串流（SSE）：data: {"delta":"..."} ... data: {"done":true,...} */
+  "POST /api/chat": async (u, body) => {
+    const s = getState();
+    const msg = String(body.message || "").trim();
+    if (!msg) throw new HttpError(400, "訊息是空的");
+    if (!aiAvailable()) throw new HttpError(503, "找不到 ANTHROPIC_API_KEY，無法對話");
+    s.chat = s.chat || [];
+    s.chat.push({ role: "user", content: msg, t: new Date().toISOString() });
+    const history = s.chat.slice(-CHAT_MAX).map(({ role, content }) => ({ role, content }));
+    const model = s.config.chat?.model || s.config.ai.model || "claude-opus-5-5";
+    const effort = s.config.chat?.effort || "low";
+    const gen = chatStream({ state: s, history, model, effort });
+    async function* events() {
+      let text = "", meta = null;
+      try {
+        for (;;) {
+          const r = await gen.next();
+          if (r.done) { meta = r.value; break; }
+          text += r.value; yield { delta: r.value };
+        }
+        s.chat.push({ role: "assistant", content: text, t: new Date().toISOString(), model: meta?.model, usage: meta?.usage && { in: meta.usage.input_tokens, out: meta.usage.output_tokens, cached: meta.usage.cache_read_input_tokens } });
+        if (s.chat.length > CHAT_MAX * 2) s.chat.splice(0, s.chat.length - CHAT_MAX * 2);
+        await saveState();
+        yield { done: true, usage: meta?.usage, model: meta?.model };
+      } catch (e) {
+        s.chat.pop(); // 失敗就不留這則提問
+        await saveState().catch(() => {});
+        yield { error: e.message };
+      }
+    }
+    return { __stream: events() };
+  },
   "POST /api/login": async (u, body, ctx) => {
     if (!authEnabled()) return { ok: true, auth: false };
     if (!checkPassword(body.password)) { await new Promise((r) => setTimeout(r, 800)); throw new HttpError(401, "密碼錯誤"); }
@@ -132,6 +168,7 @@ export async function handleApi(req) {
     // Redis 模式每次請求重新讀取，確保看到排程寫入的最新狀態
     await loadState({ fresh: storage.name === "redis" });
     const body = await handler(req.url, req.body || {}, ctx);
+    if (body && body.__stream) return { status: 200, headers: { ...headers, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" }, stream: body.__stream };
     return { status: 200, headers, body };
   } catch (e) {
     const status = e instanceof HttpError ? e.status : 500;

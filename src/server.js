@@ -38,6 +38,11 @@ http.createServer(async (req, res) => {
       try { body = await readBody(req); } catch { res.writeHead(400); return res.end("bad json"); }
     }
     const r = await handleApi({ method: req.method, url: u, headers: req.headers, body, secure: false });
+    if (r.stream) {
+      res.writeHead(r.status, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
+      for await (const ev of r.stream) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      return res.end();
+    }
     res.writeHead(r.status, { "Content-Type": "application/json; charset=utf-8", ...r.headers });
     return res.end(JSON.stringify(r.body));
   }

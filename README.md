@@ -61,6 +61,13 @@ node src/cli.js backtest 2330,2317,2454 1000000 120
    與網路搜尋做深入分析，回傳 JSON 後綜合寫出 `data/ai_decisions.json`，
    再執行 `node src/cli.js cycle --execute` 模擬成交。決策檔 30 分鐘內有效。
 
+## 跟投資長對話
+
+右下角「💬 投資長」。背景是最近一輪分析（委員會討論、各標的指標與新聞）加上帳戶與風控參數，
+由 Claude 串流回答（預設 `claude-opus-5-5`，effort low；可在 state 的 `config.chat.model` / `effort` 覆寫）。
+背景放在 system 並開 prompt cache，同一輪分析內連續對話只付一次完整輸入。對話存在 state（最多 80 則），手機與電腦共用。
+投資長不會直接下單，建議操作時會請你按「分析並模擬下單」或手動下單。
+
 ## 從外部連線（內網）
 
 伺服器綁在所有網路介面（`*:8787`），同網段直接用 `http://<本機IP>:8787`。
@@ -134,6 +141,7 @@ src/strategy.js    依綜合分數與風控產生買賣決策
 src/portfolio.js   帳本：成交、費用、估值
 src/engine.js      一輪流程 + 自動排程（autoTick：本機 setInterval 與雲端 cron 共用）
 src/analyst.js     Claude API 分析師 / 外部決策通道
+src/chat.js        投資長對話（背景整理 + Claude 串流）
 src/storage.js     儲存 adapter：Upstash Redis（雲端）或 data/（本機）
 src/routes.js      共用路由表 + 登入／排程驗證
 src/auth.js        密碼登入、HMAC 簽章 cookie（Node 與 Edge 共用）

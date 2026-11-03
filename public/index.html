@@ -183,6 +183,19 @@
   </div>
 </div>
 
+<!-- 投資長對話 -->
+<button id="btnChat" class="fab" title="跟投資長對話">💬 投資長</button>
+<div id="chat" class="drawer hidden">
+  <div class="drawer-panel chat-panel">
+    <div class="drawer-head"><h2>投資長</h2><div><button class="btn ghost small" id="chatClear">清空</button> <button class="btn ghost" data-close>關閉</button></div></div>
+    <p class="muted small" id="chatHint">背景是最近一輪分析與你的帳戶；可以問「為什麼要賣國巨」「現在該加碼什麼」「幫我看台積電」。模擬帳戶，投資長不會直接下單。</p>
+    <div id="chatLog" class="chat-log"></div>
+    <form id="chatForm" class="chat-form">
+      <textarea id="chatInput" rows="2" placeholder="問投資長…（Enter 送出，Shift+Enter 換行）"></textarea>
+      <button class="btn primary" type="submit" id="chatSend">送出</button>
+    </form>
+  </div>
+</div>
 <div id="toast" class="toast hidden"></div>
 <script src="/chart.js"></script>
 <script src="/app.js"></script>

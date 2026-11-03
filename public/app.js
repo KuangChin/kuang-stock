@@ -199,3 +199,74 @@ $("#btForm").onsubmit = async (e) => {
 refresh().then(() => { const m = location.hash.match(/sym=(\d{4,6})/); if (m) openDetail(m[1]); else if (location.hash === "#settings") openSettings(); else if (!Object.keys(S.positions).length && !S.equity.length) openSettings(); }).catch((e) => toast("無法連線伺服器：" + e.message));
 setInterval(() => { if (!busy) refresh().catch(() => {}); }, 60 * 1000);
 window.addEventListener("resize", () => render());
+
+
+// ---------- 投資長對話 ----------
+const chatLog = $("#chatLog"), chatInput = $("#chatInput");
+let chatBusy = false, chatLoaded = false;
+/** 極簡 markdown：粗體、條列、段落；先跳脫再轉換 */
+function md(text) {
+  const lines = esc(text).split("\n");
+  let out = "", inList = false;
+  for (const ln of lines) {
+    const m = ln.match(/^\s*(?:[-*•]|\d+[.、])\s+(.*)$/);
+    if (m) { if (!inList) { out += "<ul>"; inList = true; } out += `<li>${m[1]}</li>`; continue; }
+    if (inList) { out += "</ul>"; inList = false; }
+    out += ln + "\n";
+  }
+  if (inList) out += "</ul>";
+  return out.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^#{1,4}\s+(.+)$/gm, "<b>$1</b>").replace(/\n{2,}/g, "\n\n");
+}
+function chatBubble(role, text, meta) {
+  const d = document.createElement("div"); d.className = "msg " + role;
+  if (role === "assistant") d.innerHTML = md(text); else d.textContent = text;
+  if (meta) { const m = document.createElement("span"); m.className = "meta"; m.textContent = meta; d.appendChild(m); }
+  chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight; return d;
+}
+const chatMeta = (m) => `${m.t ? timeStr(m.t) : ""}${m.usage ? ` · ${m.usage.in + (m.usage.cached || 0)}→${m.usage.out} tokens${m.usage.cached ? "（快取 " + m.usage.cached + "）" : ""}` : ""}`;
+async function openChat() {
+  $("#chat").classList.remove("hidden");
+  if (!chatLoaded) {
+    chatLoaded = true;
+    try {
+      const r = await api("/api/chat");
+      chatLog.innerHTML = "";
+      if (!r.aiAvailable) $("#chatHint").textContent = "找不到 ANTHROPIC_API_KEY，對話功能無法使用。";
+      for (const m of r.messages) chatBubble(m.role, m.content, chatMeta(m));
+      if (!r.messages.length) chatBubble("assistant", "我是投資長。想知道委員會為什麼這樣判斷、或你在考慮的操作，直接問。");
+    } catch (e) { toast("讀取對話失敗：" + e.message); }
+  }
+  setTimeout(() => chatInput.focus(), 50);
+}
+$("#btnChat").onclick = openChat;
+$("#chatClear").onclick = async () => { if (!confirm("清空和投資長的對話？")) return; await api("/api/chat/clear", {}); chatLog.innerHTML = ""; chatBubble("assistant", "對話已清空。"); };
+chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chatForm").requestSubmit(); } });
+$("#chatForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = chatInput.value.trim(); if (!text || chatBusy) return;
+  chatBusy = true; $("#chatSend").disabled = true; chatInput.value = "";
+  chatBubble("user", text, timeStr(new Date().toISOString()));
+  const bubble = chatBubble("assistant", ""); bubble.classList.add("typing");
+  let acc = "";
+  try {
+    const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
+    if (r.status === 401) { location.href = "/login.html"; return; }
+    if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText); }
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
+        if (!line.startsWith("data:")) continue;
+        const ev = JSON.parse(line.slice(5));
+        if (ev.delta) { acc += ev.delta; bubble.innerHTML = md(acc); chatLog.scrollTop = chatLog.scrollHeight; }
+        else if (ev.error) throw new Error(ev.error);
+        else if (ev.done) { bubble.innerHTML = md(acc); const m = document.createElement("span"); m.className = "meta"; m.textContent = chatMeta({ t: new Date().toISOString(), usage: ev.usage && { in: ev.usage.input_tokens, out: ev.usage.output_tokens, cached: ev.usage.cache_read_input_tokens } }); bubble.appendChild(m); }
+      }
+    }
+    if (!acc) throw new Error("沒有收到回覆");
+  } catch (err) { bubble.textContent = "（失敗：" + err.message + "）"; }
+  finally { bubble.classList.remove("typing"); chatBusy = false; $("#chatSend").disabled = false; chatLog.scrollTop = chatLog.scrollHeight; }
+};
+if (location.hash === "#chat") openChat();
