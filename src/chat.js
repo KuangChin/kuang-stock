@@ -3,6 +3,8 @@
 import { loadEnv } from "./env.js";
 import { valuation } from "./portfolio.js";
 import { taipeiNow, isMarketOpen } from "./twse.js";
+import { getTaifex } from "./taifex.js";
+import { getGlobalMarkets } from "./yahoo.js";
 
 export const CHAT_MAX = 40; // 保留的對話則數
 const sign = (v, d = 1) => (v == null ? "--" : (v > 0 ? "+" : "") + Number(v).toFixed(d));
@@ -64,6 +66,19 @@ export function buildContext(state) {
   return L.join("\n");
 }
 
+const SES = { pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤", futures: "期貨" };
+/** 問的當下抓的即時資料（期交所 3 分鐘、Yahoo 10 分鐘快取），放在快取區塊之後，不影響 prompt cache */
+export async function buildLiveBlock() {
+  const [tf, g] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]);
+  const L = [`# 即時資料（${taipeiNow()}，${isMarketOpen() ? "台股盤中" : "台股盤後"}）`];
+  const c = tf?.latest;
+  if (c) L.push(`臺指期${c.session === "night" ? "夜盤" : "日盤"} ${c.name}：${c.price}，對結算價 ${sign(c.changePct, 2)}%（${sign(c.change, 0)} 點），期現價差 ${sign(c.basis, 0)}，高 ${c.high} 低 ${c.low}，量 ${c.volume}，時間 ${c.time}；現貨 ${tf.spot}`);
+  else L.push(`臺指期：目前抓不到報價`);
+  const gl = Object.values(g).filter((v) => v?.price != null).map((v) => `${v.label} ${v.price}（${sign(v.changePct, 2)}%${v.session ? "，" + SES[v.session] : ""}）`).join("；");
+  if (gl) L.push(`國際與美股：${gl}`);
+  return L.join("\n");
+}
+
 /**
  * 串流回答。history：[{role, content}]（最後一則是使用者）。
  * yield 文字片段；結束時 return { usage, stop_reason, text }。
@@ -74,16 +89,15 @@ export async function* chatStream({ state, history, model = "claude-opus-5-5", e
   const ws = (process.env.ANTHROPIC_WORKSPACE_ID || "").trim();
   const client = new Anthropic(ws ? { defaultHeaders: { "anthropic-workspace-id": ws } } : {});
   const context = buildContext(state);
+  const live = await buildLiveBlock();
   const messages = history.map((m) => ({ role: m.role, content: m.content }));
-  // 時間放在最後一則使用者訊息，system 保持不變才吃得到快取
-  const last = messages[messages.length - 1];
-  last.content = `（現在 ${taipeiNow()}，${isMarketOpen() ? "盤中" : "盤後"}）\n${last.content}`;
   const stream = client.messages.stream({
     model,
     max_tokens: 8000,
     system: [
       { type: "text", text: SYSTEM },
-      { type: "text", text: "# 背景資料\n" + context, cache_control: { type: "ephemeral" } },
+      { type: "text", text: "# 背景資料（最近一輪分析）\n" + context, cache_control: { type: "ephemeral" } },
+      { type: "text", text: live + "\n\n即時資料比背景資料新；兩者衝突時以即時資料為準，並提醒對方背景分析是哪個時間點做的。" },
     ],
     messages,
     output_config: { effort },
