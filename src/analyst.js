@@ -41,6 +41,11 @@ function buildPrompt(snapshot) {
   lines.push(`時間：${snapshot.time}（台北）。市場狀態：${snapshot.marketOpen ? "盤中" : "盤後"}。`);
   const idx = snapshot.indices?.taiex;
   if (idx) lines.push(`加權指數 ${idx.price} (${idx.changePct}%)。總經新聞情緒 ${snapshot.macroSentiment}。`);
+  const tf = snapshot.taifex?.latest;
+  if (tf) lines.push(`臺指期${tf.session === "night" ? "夜盤" : "日盤"} ${tf.price}（對結算 ${tf.changePct > 0 ? "+" : ""}${tf.changePct}%，期現價差 ${tf.basis}，${tf.time}）。`);
+  const g = snapshot.global || {};
+  const gl = Object.values(g).filter((x) => x?.price != null).map((x) => `${x.label} ${x.price}（${x.changePct > 0 ? "+" : ""}${x.changePct}%${x.session && x.session !== "futures" ? "，" + { pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤" }[x.session] : ""}${x.ret5 != null ? "，5日 " + (x.ret5 > 0 ? "+" : "") + x.ret5 + "%" : ""}）`).join("；");
+  if (gl) lines.push(`國際市場：${gl}。`);
   lines.push(`\n帳戶：現金 ${snapshot.valuation.cash}，持股市值 ${snapshot.valuation.marketValue}，總資產 ${snapshot.valuation.total}，累積報酬 ${snapshot.valuation.returnPct}%。`);
   lines.push(`風控參數：${JSON.stringify(snapshot.risk)}`);
   lines.push(`\n持股：`);

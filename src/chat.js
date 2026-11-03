@@ -36,9 +36,12 @@ export function buildContext(state) {
   L.push(`\n# 最近一輪分析（${lc.tTaipei}，${lc.marketOpen ? "盤中" : "盤後"}，${lc.executed ? "已模擬下單" : "僅建議"}，來源 ${lc.source}）`);
   const idx = lc.indices?.taiex, otc = lc.indices?.otc;
   if (idx) L.push(`加權指數 ${idx.price}（${sign(idx.changePct, 2)}%）${otc ? `，櫃買 ${otc.price}（${sign(otc.changePct, 2)}%）` : ""}`);
+  const tf = lc.taifex?.latest;
+  if (tf) L.push(`臺指期${tf.session === "night" ? "夜盤" : "日盤"}：${tf.price}，對結算價 ${sign(tf.changePct, 2)}%（${sign(tf.change, 0)} 點），期現價差 ${sign(tf.basis, 0)}，高低 ${tf.high}/${tf.low}，量 ${tf.volume}，時間 ${tf.time}`);
   const g = lc.global || {};
-  const gl = Object.entries(g).map(([k, v]) => `${k} ${v.price}（5日 ${sign(v.ret5)}%，20日 ${sign(v.ret20)}%）`).join("；");
-  if (gl) L.push(`國際：${gl}`);
+  const ses = { pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤", futures: "期貨" };
+  const gl = Object.values(g).filter((v) => v?.price != null).map((v) => `${v.label} ${v.price}（${sign(v.changePct, 2)}%${v.session ? "，" + ses[v.session] : ""}${v.ret5 != null ? "，5日 " + sign(v.ret5) + "%，20日 " + sign(v.ret20) + "%" : ""}）`).join("；");
+  if (gl) L.push(`國際與美股：${gl}`);
   if (lc.macro) L.push(`總經分析師 ${sign(lc.macro.score)}（${lc.macro.data?.regime || ""}）：${(lc.macro.points || []).join("；")}`);
   L.push(`總經新聞情緒 ${sign(lc.macroSentiment, 2)}`);
   if (lc.ai) {

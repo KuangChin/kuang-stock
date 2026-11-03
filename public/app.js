@@ -70,6 +70,10 @@ function render() {
 
   // 市場觀點
   $("#marketView").innerHTML = lc ? `${lc.ai ? `<p>${esc(lc.ai.market_view)}</p><p class="muted small">風險等級：${lc.ai.risk_level}</p>` : ""}${lc.aiError ? `<p class="small" style="color:var(--s2)">${esc(lc.aiError)}</p>` : ""}<p class="small">加權指數 ${fmt(idx?.price)} <span class="${cls(idx?.changePct)}">${sign(idx?.changePct, 2, "%")}</span>${lc.indices?.otc ? `，櫃買 ${fmt(lc.indices.otc.price)} <span class="${cls(lc.indices.otc.changePct)}">${sign(lc.indices.otc.changePct, 2, "%")}</span>` : ""}</p><p class="small">總經新聞情緒：<b class="${cls(lc.macroSentiment)}">${sign(lc.macroSentiment, 2)}</b>（-1 偏空 ～ +1 偏多，關鍵字法）</p>` : '<span class="muted">尚未執行分析。</span>';
+  const tf = lc?.taifex?.latest, g = lc?.global || {};
+  const gRow = (x) => x?.price != null ? `<tr><td>${esc(x.label)}${x.session && x.session !== "futures" ? ` <span class="muted">${{ pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤" }[x.session] || ""}</span>` : ""}</td><td class="num">${fmt(x.price, x.price < 100 ? 2 : 0)}</td><td class="num ${cls(x.changePct)}">${sign(x.changePct, 2, "%")}</td></tr>` : "";
+  $("#globalTable").innerHTML = (tf ? `<tr><td><b>台指期${tf.session === "night" ? "夜盤" : "日盤"}</b> <span class="muted">${esc(tf.time || "")}</span></td><td class="num">${fmt(tf.price)}</td><td class="num ${cls(tf.changePct)}">${sign(tf.changePct, 2, "%")}</td></tr><tr class="sub-note"><td colspan="3" class="muted small">對結算價 ${sign(tf.change)} 點，期現價差 ${sign(tf.basis)}，高 ${fmt(tf.high)} 低 ${fmt(tf.low)}，量 ${fmt(tf.volume)}</td></tr>` : "") +
+    ["es", "nq", "sp500", "nasdaq", "sox", "vix", "tsm", "nvda", "aapl", "amd", "mu", "avgo", "usdtwd", "dxy", "us10y"].map((k) => gRow(g[k])).join("") || '<tr><td colspan="3" class="muted">--</td></tr>';
   $("#macroPoints").innerHTML = lc?.macro ? `<li><b>總經分析師 ${sign(lc.macro.score, 1)}</b> <span class="muted">${lc.macro.data?.regime || ""}</span></li>` + (lc.macro.points || []).map((x) => `<li>· ${esc(x)}</li>`).join("") : "";
   $("#macroNews").innerHTML = (lc?.macroNews || []).slice(0, 14).map(newsLi).join("") || '<li class="muted">--</li>';
 

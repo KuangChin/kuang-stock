@@ -111,6 +111,7 @@ details { margin: 14px 0; } summary { cursor: pointer; font-size: 13px; padding:
 #cmActions li { padding: 4px 0; font-size: 13px; }
 
 tr.sub { display: none; }   /* 手機版才顯示的理由列 */
+table.compact td { padding: 4px 6px; font-size: 12.5px; } table.compact tr.sub-note td { padding-top: 0; white-space: normal; border-bottom: 1px solid var(--grid); }
 
 /* ---------- 投資長對話 ---------- */
 .fab { position: fixed; right: 18px; bottom: 18px; z-index: 15; border: 0; border-radius: 24px; padding: 10px 16px; background: var(--s1); color: #fff; font: inherit; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: pointer; }

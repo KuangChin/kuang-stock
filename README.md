@@ -126,7 +126,9 @@ curl -s https://<app>/api/quotes?symbols=2330 --cookie "ks_session=..."   # 確�
 
 - 即時報價、指數：`mis.twse.com.tw`（約 5 秒更新，無需金鑰）
 - 日線、三大法人、融資融券、本益比、月營收：`www.twse.com.tw`、`openapi.twse.com.tw`（上市）、`www.tpex.org.tw`（上櫃），快取在 `data/cache/`
-- 美股、費半、VIX、匯率、美債：Yahoo Finance chart API
+- 臺指期日盤／夜盤近月（對結算價漲跌、期現價差）：`mis.taifex.com.tw`，快取 3 分鐘
+- 美股指數、費半、VIX、美元指數、匯率、美債：Yahoo Finance chart API（日線）
+- S&P 500 與那斯達克期貨、台積電 ADR、NVIDIA、Apple、AMD、美光、博通：Yahoo Finance 5 分 K 含盤前盤後，快取 10 分鐘
 - 新聞：Google 新聞 RSS（繁中 / 台灣）
 
 ## 檔案
@@ -136,7 +138,8 @@ src/twse.js        證交所 / 櫃買 資料層
 src/indicators.js  SMA EMA RSI MACD KD 布林 ATR
 src/news.js        新聞抓取與關鍵字情緒
 src/analysts/      五位分析師 + 投資長加權（technical / fundamental / chips / macro / sentiment / index）
-src/yahoo.js       國際市場
+src/yahoo.js       國際市場（指數日線 + 期貨／美股含盤前盤後）
+src/taifex.js      期交所臺指期日盤／夜盤
 src/strategy.js    依綜合分數與風控產生買賣決策
 src/portfolio.js   帳本：成交、費用、估值
 src/engine.js      一輪流程 + 自動排程（autoTick：本機 setInterval 與雲端 cron 共用）
