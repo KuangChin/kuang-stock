@@ -1,0 +1,20 @@
+{
+  "name": "kuang-stock",
+  "version": "0.1.0",
+  "description": "台股模擬操盤：即時報價、技術指標、新聞情緒、規則/AI 策略、紙上交易",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "cycle": "node src/cli.js cycle",
+    "backtest": "node src/cli.js backtest",
+    "migrate-state": "node scripts/migrate-state.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "zod": "^3.23.0"
+  }
+}

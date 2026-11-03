@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kuang-stock 模擬操盤</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>kuang-stock <span class="muted">模擬操盤</span></h1>
+    <div class="status"><span id="clock">--</span> <span id="marketBadge" class="badge">--</span> <span id="aiBadge" class="badge">--</span></div>
+  </div>
+  <div class="actions">
+    <button id="btnAnalyze" class="btn">分析（不下單）</button>
+    <button id="btnRun" class="btn primary">分析並模擬下單</button>
+    <button id="btnSettings" class="btn ghost">設定</button>
+  </div>
+</header>
+
+<main>
+  <section id="committee" class="card committee hidden">
+    <div class="card-head"><h2>投資委員會結論</h2><span class="muted" id="cmNote"></span></div>
+    <div class="committee-grid">
+      <div class="cm-left">
+        <div id="cmAnalysts" class="cm-analysts"></div>
+      </div>
+      <div class="cm-right">
+        <div class="cm-label">投資長總結</div>
+        <p id="cmConclusion" class="prose"></p>
+        <div class="cm-label">行動方案</div>
+        <p id="cmPlan" class="prose plan"></p>
+        <ul id="cmActions" class="plain"></ul>
+      </div>
+    </div>
+  </section>
+  <section id="kpis" class="kpi-row"></section>
+
+  <div class="grid">
+    <div class="col-main">
+      <section class="card">
+        <div class="card-head"><h2>資產曲線</h2><span class="muted" id="equityNote"></span></div>
+        <div id="equityChart" class="chart"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>持股</h2><span class="muted" id="posNote"></span></div>
+        <div class="table-wrap"><table id="posTable"><thead><tr><th>代碼</th><th>名稱</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">漲跌%</th><th class="num">市值</th><th class="num">損益</th><th class="num">損益%</th><th>訊號</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>訊號與決策</h2><span class="muted" id="decNote"></span></div>
+        <div class="table-wrap"><table id="decTable"><thead><tr><th>代碼</th><th>名稱</th><th class="num">現價</th><th class="num">漲跌%</th><th>綜合</th><th class="num" title="技術線型">技術</th><th class="num" title="基本面">基本</th><th class="num" title="籌碼">籌碼</th><th class="num" title="總經">總經</th><th class="num" title="情緒">情緒</th><th>動作</th><th class="num">股數</th><th>理由</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>交易紀錄</h2><span class="muted" id="tradeNote"></span></div>
+        <div class="table-wrap"><table id="tradeTable"><thead><tr><th>時間</th><th>代碼</th><th>名稱</th><th>方向</th><th class="num">股數</th><th class="num">價格</th><th class="num">費用+稅</th><th class="num">已實現</th><th>來源</th><th>理由</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>歷史回測</h2><span class="muted">同一套規則策略在過去日線上逐日模擬，以次日開盤價成交，不含新聞</span></div>
+        <form id="btForm" class="inline-form">
+          <label>標的 <input name="symbols" value="2330,2317,2454,0050" size="28"></label>
+          <label>起始現金 <input name="cash" type="number" value="1000000" step="10000"></label>
+          <label>天數 <input name="days" type="number" value="120" min="20" max="240"></label>
+          <button class="btn" type="submit">執行回測</button>
+        </form>
+        <div id="btStats" class="kpi-row small"></div>
+        <div id="btChart" class="chart hidden"></div>
+        <div class="table-wrap"><table id="btTrades" class="hidden"><thead><tr><th>日期</th><th>代碼</th><th>方向</th><th class="num">股數</th><th class="num">價格</th><th class="num">已實現</th><th>理由</th></tr></thead><tbody></tbody></table></div>
+      </section>
+    </div>
+
+    <aside class="col-side">
+      <section class="card">
+        <div class="card-head"><h2>市場觀點</h2></div>
+        <div id="marketView" class="prose muted">尚未執行分析。</div>
+        <ul id="macroPoints" class="plain small"></ul>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>總經 / 世界新聞</h2></div>
+        <ul id="macroNews" class="news"></ul>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>系統日誌</h2></div>
+        <ul id="log" class="log"></ul>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<!-- 個股明細 -->
+<div id="drawer" class="drawer hidden">
+  <div class="drawer-panel">
+    <div class="drawer-head"><h2 id="dTitle">--</h2><button class="btn ghost" data-close>關閉</button></div>
+    <div id="dBody">
+      <div class="kpi-row small" id="dKpis"></div>
+      <div id="dAnalysts" class="analyst-grid"></div>
+      <div id="dPrice" class="chart"></div>
+      <div id="dRsi" class="chart short"></div>
+      <div class="two-col">
+        <div><h3>指標</h3><dl id="dInd" class="dl"></dl></div>
+        <div><h3>訊號理由</h3><ul id="dReasons" class="plain"></ul>
+          <h3>手動下單</h3>
+          <form id="orderForm" class="inline-form">
+            <select name="side"><option value="BUY">買進</option><option value="SELL">賣出</option></select>
+            <input name="shares" type="number" value="1000" min="1" step="1"> 股
+            <button class="btn" type="submit">送出</button>
+          </form>
+        </div>
+      </div>
+      <h3>相關新聞</h3><ul id="dNews" class="news"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div id="settings" class="drawer hidden">
+  <div class="drawer-panel">
+    <div class="drawer-head"><h2>設定</h2><button class="btn ghost" data-close>關閉</button></div>
+    <form id="setupForm">
+      <h3>帳戶（重設會清空交易紀錄）</h3>
+      <label>存款 / 現金 <input name="cash" type="number" step="1000" value="1000000"></label>
+      <h4>目前持股</h4>
+      <table id="posEdit"><thead><tr><th>代碼</th><th>股數</th><th>平均成本</th><th></th></tr></thead><tbody></tbody></table>
+      <button type="button" class="btn ghost" id="addPosRow">+ 新增持股</button>
+      <button type="button" class="btn" id="btnReset">套用並重設帳戶</button>
+
+      <h3>觀察清單</h3>
+      <div id="watchChips" class="chips"></div>
+      <div class="inline-form"><input id="watchInput" placeholder="輸入代碼或名稱，例如 2330 或 台積電" size="30"><div id="watchSuggest" class="suggest"></div></div>
+
+      <h3>讓系統自己摸索</h3>
+      <p class="muted small">不想調參數的話，按這顆：系統會用觀察清單過去 120 天的日線回測幾十組風控參數，挑「報酬扣掉一半回撤」最好的一組直接套用。分析師權重與買賣決策本來就由系統自己判斷，不用你設定。</p>
+      <div class="inline-form"><button type="button" class="btn primary" id="btnTune">自動調整風控參數</button><span id="tuneResult" class="small muted"></span></div>
+
+      <details id="advanced"><summary class="muted">進階參數（通常不用動）</summary>
+      <h3>風控參數</h3>
+      <div class="param-grid">
+        <label>單一持股上限 % <input name="maxPositionPct" type="number" step="1"></label>
+        <label>每次買進占總資產 % <input name="perTradePct" type="number" step="1"></label>
+        <label>停損 % <input name="stopLossPct" type="number" step="0.5"></label>
+        <label>停利（減碼一半）% <input name="takeProfitPct" type="number" step="1"></label>
+        <label>保留現金 % <input name="minCashPct" type="number" step="1"></label>
+        <label>買進分數門檻 <input name="buyThreshold" type="number" step="0.5"></label>
+        <label>賣出分數門檻 <input name="sellThreshold" type="number" step="0.5"></label>
+        <label>最多持股檔數 <input name="maxPositions" type="number" step="1"></label>
+        <label>加碼冷卻天數 <input name="cooldownDays" type="number" step="1"></label>
+        <label>最小下單金額 <input name="minOrderAmount" type="number" step="1000"></label>
+        <label><input name="oddLot" type="checkbox"> 允許零股</label>
+      </div>
+
+      <h3>分析師權重（投資長加權，總和會自動正規化）</h3>
+      <div class="param-grid">
+        <label>技術線型 <input name="w_technical" type="number" step="5" min="0"></label>
+        <label>基本面 <input name="w_fundamental" type="number" step="5" min="0"></label>
+        <label>籌碼 <input name="w_chips" type="number" step="5" min="0"></label>
+        <label>總經 <input name="w_macro" type="number" step="5" min="0"></label>
+        <label>情緒 <input name="w_sentiment" type="number" step="5" min="0"></label>
+      </div>
+
+      <h3>自動模擬</h3>
+      <div class="param-grid">
+        <label><input name="autoEnabled" type="checkbox"> 盤中自動執行並下單</label>
+        <label>間隔分鐘 <input name="intervalMin" type="number" min="1" step="1"></label>
+        <label><input name="executeOnClose" type="checkbox"> 收盤後跑一次</label>
+      </div>
+
+      <h3>AI 分析師（Claude）</h3>
+      <div class="param-grid">
+        <label><input name="aiEnabled" type="checkbox"> 啟用（金鑰放在專案根目錄 .env：ANTHROPIC_API_KEY=...，存檔即生效）</label>
+        <label>模型 <input name="aiModel" size="20"></label>
+        <label>推理深度 <select name="aiEffort"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+      </div>
+      <p class="muted small">另一條路：在 Claude Code 執行 <code>/analyze</code>，五位分析師 sub-agent 會寫出 <code>data/ai_decisions.json</code>，下一輪優先採用（30 分鐘內有效）。</p>
+      </details>
+      <p></p>
+      <button type="submit" class="btn primary">儲存設定</button>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/chart.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

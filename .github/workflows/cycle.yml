@@ -1,0 +1,23 @@
+# 盤中每 5 分鐘與收盤後呼叫 Vercel 上的 /api/cycle（取代本機的 setInterval）。
+# cron 用 UTC：1-5 時 = 台北 09:00-13:55；06:15 UTC = 14:15 補跑收盤輪次（收盤一天只執行一次，由伺服器端防重複）。
+# 需要的 repo secrets：APP_URL（例如 https://kuang-stock.vercel.app）、CRON_SECRET（與 Vercel 環境變數相同）。
+# 注意：GitHub 排程可能延遲數分鐘；repo 60 天沒有活動時排程會被自動停用。
+name: auto-cycle
+on:
+  schedule:
+    - cron: "*/5 1-5 * * 1-5"
+    - cron: "15 6 * * 1-5"
+  workflow_dispatch:
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call /api/cycle
+        run: |
+          curl -fsS -X POST "${{ secrets.APP_URL }}/api/cycle" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --max-time 330 \
+            -d '{}' | tee result.json
+          echo; echo "reason: $(jq -r .reason result.json)"
