@@ -109,3 +109,34 @@ details { margin: 14px 0; } summary { cursor: pointer; font-size: 13px; padding:
 .cm-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .committee .prose { margin: 4px 0 10px; } .committee .plan { font-weight: 600; font-size: 15px; }
 #cmActions li { padding: 4px 0; font-size: 13px; }
+
+tr.sub { display: none; }   /* 手機版才顯示的理由列 */
+
+/* ---------- 手機版 ---------- */
+.col-main, .col-side, .cm-left, .cm-right { min-width: 0; }   /* 讓表格在格子內捲動，不把整頁撐寬 */
+@media (max-width: 700px) {
+  main { padding: 10px 10px 40px; }
+  .topbar { padding: 10px 12px; gap: 8px; }
+  .topbar .brand { flex: 1 1 100%; }
+  .actions { flex: 1 1 100%; } .actions .btn { flex: 1; padding: 8px 6px; font-size: 13px; white-space: nowrap; }
+  .card { padding: 10px 12px; margin-bottom: 10px; }
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tile .value { font-size: 19px; }
+  .chart { height: 200px; }
+  .committee-grid { gap: 10px; }
+  .cm-row { grid-template-columns: 56px 40px 1fr; }
+  .committee .plan { font-size: 14px; }
+  td.wrap { min-width: 200px; }
+  /* 訊號表：隱藏五位分析師分數欄（點進明細看）與理由欄，理由改顯示在下一列 */
+  #decTable th:nth-child(n+6):nth-child(-n+10), #decTable tr:not(.sub) > td:nth-child(n+6):nth-child(-n+10),
+  #decTable th:nth-child(n+11):nth-child(-n+13), #decTable tr:not(.sub) > td:nth-child(n+11):nth-child(-n+13) { display: none; }
+  #tradeTable th:nth-child(7), #tradeTable tr:not(.sub) > td:nth-child(7), #tradeTable th:nth-child(9), #tradeTable tr:not(.sub) > td:nth-child(9),
+  #tradeTable th:nth-child(10), #tradeTable tr:not(.sub) > td:nth-child(10) { display: none; }
+  tr.sub { display: table-row; } tr.sub td { white-space: normal; font-size: 12px; color: var(--ink-2); padding-top: 0; } .subtx { max-width: calc(100vw - 64px); line-height: 1.45; }
+  tr:has(+ tr.sub) td { border-bottom: 0; padding-bottom: 2px; }
+  th, td { padding: 6px 6px; }
+  .inline-form input[name=symbols] { width: 100%; }
+  .drawer-panel { padding: 12px 12px 40px; }
+  .param-grid { grid-template-columns: 1fr; }
+  #posEdit input { width: 80px; }
+}
