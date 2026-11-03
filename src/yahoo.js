@@ -1,7 +1,9 @@
 // 國際市場：Yahoo Finance 公開 chart API（無需金鑰）
 // - 指數／匯率／利率：日線，算當日漲跌與 5/20 日報酬
 // - 美股期貨與個股：1 分 K 含盤前盤後，取最新價對前一日收盤（可看到盤前／夜間變化）
+import { storage } from "./storage.js";
 const UA = { "User-Agent": "Mozilla/5.0" };
+const TTL_MS = 60 * 1000; // 即時快取 1 分鐘；透過 storage 讓多個 serverless 實例共用
 export const GLOBAL_LABELS = {
   sp500: "S&P 500", nasdaq: "那斯達克", sox: "費城半導體", vix: "VIX", usdtwd: "美元/台幣", us10y: "美債10年", dxy: "美元指數",
   es: "S&P 500 期貨", nq: "那斯達克期貨", tsm: "台積電 ADR", nvda: "NVIDIA", aapl: "Apple", amd: "AMD", mu: "美光", avgo: "博通",
@@ -49,13 +51,13 @@ async function daily(k, sym) {
 
 /** 期貨／個股：最新成交（含盤前盤後）對前一日收盤；session 說明現在是哪個時段 */
 async function live(k, sym) {
-  const res = await chart(sym, "range=1d&interval=5m&includePrePost=true");
+  const res = await chart(sym, "range=1d&interval=1m&includePrePost=true");
   const m = res.meta;
   const closes = res.indicators.quote[0].close || [];
   const ts = res.timestamp || [];
   let last = null, lastTs = null;
   for (let i = closes.length - 1; i >= 0; i--) if (closes[i] != null) { last = closes[i]; lastTs = ts[i]; break; }
-  const price = last ?? m.regularMarketPrice;
+  const price = last != null ? +last.toFixed(2) : m.regularMarketPrice;
   const prev = m.previousClose ?? m.chartPreviousClose;
   const now = Date.now() / 1000, p = m.currentTradingPeriod || {};
   const inRange = (x) => x && now >= x.start && now < x.end;
@@ -64,12 +66,15 @@ async function live(k, sym) {
 }
 
 export async function getGlobalMarkets() {
-  if (cache.data && Date.now() - cache.t < 10 * 60 * 1000) return cache.data;
+  if (cache.data && Date.now() - cache.t < TTL_MS) return cache.data;
+  const shared = await storage.cacheGet("yahoo:global", TTL_MS).catch(() => null);
+  if (shared) { cache = { t: Date.now(), data: shared }; return shared; }
   const out = {};
   await Promise.all([
     ...Object.entries(DAILY).map(async ([k, sym]) => { try { out[k] = await daily(k, sym); } catch (e) { console.warn("[yahoo]", sym, e.message); } }),
     ...Object.entries(LIVE).map(async ([k, sym]) => { try { out[k] = await live(k, sym); } catch (e) { console.warn("[yahoo]", sym, e.message); } }),
   ]);
   cache = { t: Date.now(), data: out };
+  if (Object.keys(out).length) storage.cacheSet("yahoo:global", out).catch(() => {});
   return out;
 }

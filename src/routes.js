@@ -8,6 +8,8 @@ import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow } from
 import { executeOrder, valuation } from "./portfolio.js";
 import { aiAvailable } from "./analyst.js";
 import { chatStream, CHAT_MAX } from "./chat.js";
+import { getTaifex } from "./taifex.js";
+import { getGlobalMarkets } from "./yahoo.js";
 import { storage, isServerless, backend } from "./storage.js";
 import { authEnabled, verifySession, verifyCron, checkPassword, issueSession, sessionCookie, clearCookie, parseCookies, COOKIE } from "./auth.js";
 
@@ -34,6 +36,8 @@ export const routes = {
   "GET /api/quotes": async (u) => { const syms = (u.searchParams.get("symbols") || "").split(",").filter(Boolean); return { quotes: await getQuotes(syms), indices: await getIndexQuotes() }; },
   "GET /api/search": async (u) => searchStocks(u.searchParams.get("q"), 12),
   "GET /api/symbol": async (u) => symbolDetail(u.searchParams.get("code")),
+  // 側欄即時報價：臺指期（45 秒快取）與美股／國際市場（1 分鐘快取），不綁在分析快照上
+  "GET /api/live": async () => { const [taifex, global] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]); return { t: taipeiNow(), taifex, global }; },
   "POST /api/config": async (u, body) => {
     const s = getState();
     const c = s.config;

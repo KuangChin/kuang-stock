@@ -8,6 +8,7 @@ const timeStr = (iso) => (iso ? new Date(iso).toLocaleString("zh-TW", { hour12: 
 const CSS = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let S = null; // server state
+let LIVE = null; // /api/live 即時報價（台指期＋國際市場），每分鐘更新
 let busy = false;
 
 async function api(path, body) {
@@ -70,10 +71,7 @@ function render() {
 
   // 市場觀點
   $("#marketView").innerHTML = lc ? `${lc.ai ? `<p>${esc(lc.ai.market_view)}</p><p class="muted small">風險等級：${lc.ai.risk_level}</p>` : ""}${lc.aiError ? `<p class="small" style="color:var(--s2)">${esc(lc.aiError)}</p>` : ""}<p class="small">加權指數 ${fmt(idx?.price)} <span class="${cls(idx?.changePct)}">${sign(idx?.changePct, 2, "%")}</span>${lc.indices?.otc ? `，櫃買 ${fmt(lc.indices.otc.price)} <span class="${cls(lc.indices.otc.changePct)}">${sign(lc.indices.otc.changePct, 2, "%")}</span>` : ""}</p><p class="small">總經新聞情緒：<b class="${cls(lc.macroSentiment)}">${sign(lc.macroSentiment, 2)}</b>（-1 偏空 ～ +1 偏多，關鍵字法）</p>` : '<span class="muted">尚未執行分析。</span>';
-  const tf = lc?.taifex?.latest, g = lc?.global || {};
-  const gRow = (x) => x?.price != null ? `<tr><td>${esc(x.label)}${x.session && x.session !== "futures" ? ` <span class="muted">${{ pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤" }[x.session] || ""}</span>` : ""}</td><td class="num">${fmt(x.price, x.price < 100 ? 2 : 0)}</td><td class="num ${cls(x.changePct)}">${sign(x.changePct, 2, "%")}</td></tr>` : "";
-  $("#globalTable").innerHTML = (tf ? `<tr><td><b>台指期${tf.session === "night" ? "夜盤" : "日盤"}</b> <span class="muted">${esc(tf.time || "")}</span></td><td class="num">${fmt(tf.price)}</td><td class="num ${cls(tf.changePct)}">${sign(tf.changePct, 2, "%")}</td></tr><tr class="sub-note"><td colspan="3" class="muted small">對結算價 ${sign(tf.change)} 點，期現價差 ${sign(tf.basis)}，高 ${fmt(tf.high)} 低 ${fmt(tf.low)}，量 ${fmt(tf.volume)}</td></tr>` : "") +
-    ["es", "nq", "sp500", "nasdaq", "sox", "vix", "tsm", "nvda", "aapl", "amd", "mu", "avgo", "usdtwd", "dxy", "us10y"].map((k) => gRow(g[k])).join("") || '<tr><td colspan="3" class="muted">--</td></tr>';
+  renderGlobal();
   $("#macroPoints").innerHTML = lc?.macro ? `<li><b>總經分析師 ${sign(lc.macro.score, 1)}</b> <span class="muted">${lc.macro.data?.regime || ""}</span></li>` + (lc.macro.points || []).map((x) => `<li>· ${esc(x)}</li>`).join("") : "";
   $("#macroNews").innerHTML = (lc?.macroNews || []).slice(0, 14).map(newsLi).join("") || '<li class="muted">--</li>';
 
@@ -84,6 +82,18 @@ function render() {
   // 日誌
   $("#log").innerHTML = S.log.slice(0, 40).map((l) => `<li class="${l.level}">${timeStr(l.t)} ${esc(l.msg)}</li>`).join("");
 }
+// 側欄即時表：優先用 /api/live，抓不到時退回最近一輪分析的快照
+function renderGlobal() {
+  const lc = S?.lastCycle;
+  const src = LIVE || { taifex: lc?.taifex, global: lc?.global, t: lc?.tTaipei, snapshot: true };
+  const tf = src.taifex?.latest, g = src.global || {};
+  const gRow = (x) => x?.price != null ? `<tr><td>${esc(x.label)}${x.session && x.session !== "futures" ? ` <span class="muted">${{ pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤" }[x.session] || ""}</span>` : ""}</td><td class="num">${fmt(x.price, x.price < 1000 ? 2 : 0)}</td><td class="num ${cls(x.changePct)}">${sign(x.changePct, 2, "%")}</td></tr>` : "";
+  $("#globalTable").innerHTML = (tf ? `<tr><td><b>台指期${tf.session === "night" ? "夜盤" : "日盤"}</b> <span class="muted">${esc(tf.time || "")}</span></td><td class="num">${fmt(tf.price)}</td><td class="num ${cls(tf.changePct)}">${sign(tf.changePct, 2, "%")}</td></tr><tr class="sub-note"><td colspan="3" class="muted small">對結算價 ${sign(tf.change)} 點，期現價差 ${sign(tf.basis)}，高 ${fmt(tf.high)} 低 ${fmt(tf.low)}，量 ${fmt(tf.volume)}</td></tr>` : "") +
+    ["es", "nq", "sp500", "nasdaq", "sox", "vix", "tsm", "nvda", "aapl", "amd", "mu", "avgo", "usdtwd", "dxy", "us10y"].map((k) => gRow(g[k])).join("") || '<tr><td colspan="3" class="muted">--</td></tr>';
+  const t = src.t ? String(src.t).replace(/^\d+\/\d+\/\d+ /, "").slice(0, 5) : "";
+  $("#globalNote").textContent = src.snapshot ? (t ? `分析快照 ${t}` : "每分鐘更新，含盤前盤後") : `更新 ${t}，每分鐘自動更新`;
+}
+async function refreshLive() { try { LIVE = await api("/api/live"); } catch { LIVE = null; } if (S) renderGlobal(); }
 const ANALYST_ORDER = ["technical", "fundamental", "chips", "macro", "sentiment"];
 const miniScores = (an) => ANALYST_ORDER.map((k) => { const b = an?.[k]; return `<td class="num mini ${cls(b?.score)}" title="${b ? esc(b.points.slice(0, 3).join("\n")) : ""}">${b ? sign(b.score, 1) : "--"}</td>`; }).join("");
 const pill = (a) => `<span class="pill ${a}">${{ BUY: "買進", SELL: "賣出", HOLD: "觀望" }[a] || a}</span>`;
@@ -202,6 +212,9 @@ $("#btForm").onsubmit = async (e) => {
 // ---------- 啟動 ----------
 refresh().then(() => { const m = location.hash.match(/sym=(\d{4,6})/); if (m) openDetail(m[1]); else if (location.hash === "#settings") openSettings(); else if (!Object.keys(S.positions).length && !S.equity.length) openSettings(); }).catch((e) => toast("無法連線伺服器：" + e.message));
 setInterval(() => { if (!busy) refresh().catch(() => {}); }, 60 * 1000);
+refreshLive();
+setInterval(refreshLive, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshLive(); });
 window.addEventListener("resize", () => render());
 
 

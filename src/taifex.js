@@ -1,6 +1,8 @@
 // 期交所即時報價（mis.taifex.com.tw，無需金鑰）：臺指期日盤 / 夜盤近月合約
 // 夜盤 15:00–次日 05:00，日盤 08:45–13:45。夜盤漲跌以日盤結算價（CRefPrice）為基準。
+import { storage } from "./storage.js";
 const URL = "https://mis.taifex.com.tw/futures/api/getQuoteList";
+const TTL_MS = 45 * 1000; // 即時快取 45 秒；透過 storage 讓多個 serverless 實例共用
 const num = (s) => { const v = parseFloat(String(s ?? "").replace(/,/g, "")); return Number.isFinite(v) ? v : null; };
 let cache = { t: 0, data: null };
 
@@ -39,7 +41,9 @@ function pick(list, session) {
 
 /** 回 { spot, day, night, latest } ；latest = 目前有在交易或最近一個時段的合約 */
 export async function getTaifex() {
-  if (cache.data && Date.now() - cache.t < 3 * 60 * 1000) return cache.data;
+  if (cache.data && Date.now() - cache.t < TTL_MS) return cache.data;
+  const shared = await storage.cacheGet("taifex:txf", TTL_MS).catch(() => null);
+  if (shared) { cache = { t: Date.now(), data: shared }; return shared; }
   const [dayList, nightList] = await Promise.all([quoteList("0").catch(() => []), quoteList("1").catch(() => [])]);
   const day = pick(dayList, "day"), night = pick(nightList, "night");
   const tw = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei" }));
@@ -47,5 +51,6 @@ export async function getTaifex() {
   const dayHours = mins >= 8 * 60 + 45 && mins <= 13 * 60 + 50;
   const out = { spot: day.spot ?? night.spot, day: day.contract, night: night.contract, latest: dayHours ? day.contract || night.contract : night.contract || day.contract };
   cache = { t: Date.now(), data: out };
+  if (out.latest) storage.cacheSet("taifex:txf", out).catch(() => {});
   return out;
 }
