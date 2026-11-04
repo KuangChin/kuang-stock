@@ -4,6 +4,9 @@ import { loadEnv } from "./env.js";
 import { valuation } from "./portfolio.js";
 import { taipeiNow, isMarketOpen, searchStocks } from "./twse.js";
 import { addLog } from "./store.js";
+import { runBacktest } from "./backtest.js";
+import { isServerless } from "./storage.js";
+import { DEFAULT_WEIGHTS, LABELS } from "./analysts/index.js";
 import { getTaifex } from "./taifex.js";
 import { getGlobalMarkets } from "./yahoo.js";
 
@@ -15,7 +18,10 @@ const SYSTEM = `你是「投資長」，主持一個台股模擬交易帳戶的�
 1. 回答依據背景資料裡的分析、持股、新聞與風控參數；資料沒有的事要明說「資料裡沒有」，不要編造數字。
 2. 用繁體中文、台灣用語，口吻像一位務實的投資長：直接、具體、講理由，不說教，不免責聲明連篇。
 3. 這是模擬帳戶，你不能直接下單；若建議操作，說清楚標的、方向、股數或比例、觸發條件，請對方在頁面按「分析並模擬下單」或手動下單。
-   你可以用工具修改「追蹤清單」（add_watchlist / remove_watchlist）；對方給的是名稱時先用 search_stock 查到正確代碼再加，加完用一句話回報加了哪些、現在清單有哪些。追蹤清單的股票會在下一輪分析納入。
+   你可以用工具修改設定：追蹤清單（add_watchlist / remove_watchlist / set_watchlist）、風控參數（set_risk，例如停損、單一持股上限、買賣門檻）、
+   六位分析師的權重（set_weights）、跑回測（run_backtest）、查目前設定（get_settings）。對方給的是名稱時先用 search_stock 查到正確代碼。
+   對方要「鎖定某個族群」時，自己挑出該族群在台股的代表性標的（用 search_stock 確認代碼），用 set_watchlist 整份換掉，並說明挑了哪些、為什麼。
+   改完用幾句話回報改了什麼、現在的值是多少。回測結果要講報酬、最大回撤、交易次數、與 0050 同期比較，並給一句評語。追蹤清單的股票會在下一輪分析納入。
 4. 回答長度看問題：閒聊或簡單問題兩三句就好；分析類問題用短段落或條列，不要超過 300 字，除非對方要求詳細。
 5. 可以表達不同意委員會先前的結論，但要說明新理由。
 6. 停損、停利等風控數字一律以背景資料「風控」那一行為準（那是帳戶主人自己設的），不要引用其他比例；「保留現金」是現金比例，不是停損。`;
@@ -33,6 +39,8 @@ export function buildContext(state) {
   if (!val.rows.length) L.push(`- 無持股`);
   const rk = state.config.risk;
   L.push(`風控：停損 ${rk.stopLossPct * 100}%、停利 ${rk.takeProfitPct * 100}%（減半）、單一持股上限 ${rk.maxPositionPct * 100}%、每筆 ${rk.perTradePct * 100}%、保留現金 ${rk.minCashPct * 100}%、買進門檻 ${rk.buyThreshold}、賣出門檻 ${rk.sellThreshold}、冷卻 ${rk.cooldownDays} 天、最多 ${rk.maxPositions} 檔。`);
+  const W = state.config.weights || {};
+  L.push(`分析師權重：${Object.keys(DEFAULT_WEIGHTS).map((k) => `${LABELS[k]} ${Math.round((W[k] ?? 0) * 100)}%`).join("、")}${rk.lockStopLoss ? "；停損已鎖定（自動調參不會改）" : ""}`);
   L.push(`自動執行：${state.config.auto.enabled ? `開（盤中每 ${state.config.auto.intervalMin} 分鐘${state.config.auto.executeOnClose ? "，收盤後一次" : ""}）` : "關"}；AI 分析師：${state.config.ai.enabled ? "開" : "關"}。`);
   const trades = state.trades.slice(0, 8);
   if (trades.length) { L.push(`最近交易：`); for (const t of trades) L.push(`- ${t.t.slice(0, 16).replace("T", " ")} ${t.side} ${t.symbol} ${t.name} ${t.shares} 股 @ ${t.price}（${t.source}）${t.reason ? "：" + t.reason : ""}`); }
@@ -93,7 +101,14 @@ const TOOLS = [
   { name: "search_stock", description: "用代碼或名稱搜尋台股上市／上櫃股票，回傳代碼、名稱、市場。要把股票加入追蹤前，先用它確認代碼。", input_schema: { type: "object", properties: { query: { type: "string", description: "股票代碼開頭或名稱關鍵字，例如 2330 或 台積" } }, required: ["query"] } },
   { name: "add_watchlist", description: "把股票加入追蹤清單，之後每輪分析都會納入。symbols 給 4～6 位數代碼。", input_schema: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } }, required: ["symbols"] } },
   { name: "remove_watchlist", description: "把股票從追蹤清單移除（不影響持股）。", input_schema: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } }, required: ["symbols"] } },
+  { name: "set_watchlist", description: "整份替換追蹤清單（例如鎖定某個族群）。symbols 給 4～6 位數代碼；持股不受影響，仍會被分析。", input_schema: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } }, required: ["symbols"] } },
+  { name: "get_settings", description: "讀目前的風控參數、分析師權重、追蹤清單、自動執行與 AI 設定。", input_schema: { type: "object", properties: {} } },
+  { name: "set_risk", description: "修改風控參數，只需給要改的欄位。百分比欄位用 0～100 的數字（停損 30 代表 30%；單一持股不設限給 maxPositionPct 100）。lockStopLoss=true 表示停損固定，自動調參不得更動。", input_schema: { type: "object", properties: { stopLossPct: { type: "number" }, takeProfitPct: { type: "number" }, maxPositionPct: { type: "number" }, perTradePct: { type: "number" }, minCashPct: { type: "number" }, buyThreshold: { type: "number", description: "綜合分數 -8～+8，達此值買進" }, sellThreshold: { type: "number" }, maxPositions: { type: "integer" }, cooldownDays: { type: "integer" }, lockStopLoss: { type: "boolean" } } } },
+  { name: "set_weights", description: "調整六位分析師的權重（technical 技術、fundamental 基本面、chips 籌碼、macro 總經、sentiment 情緒、advisor 投顧），用 0～100 的數字，只需給要改的；系統會自動把總和正規化成 100%。", input_schema: { type: "object", properties: { technical: { type: "number" }, fundamental: { type: "number" }, chips: { type: "number" }, macro: { type: "number" }, sentiment: { type: "number" }, advisor: { type: "number" } } } },
+  { name: "run_backtest", description: "用目前風控參數回測（只用技術線型分析師，沒有籌碼與新聞的歷史）。days 預設 240 個交易日；symbols 不給就用追蹤清單＋持股。要花 30～120 秒。", input_schema: { type: "object", properties: { days: { type: "integer" }, symbols: { type: "array", items: { type: "string" } } } } },
 ];
+const PCT_FIELDS = ["stopLossPct", "takeProfitPct", "maxPositionPct", "perTradePct", "minCashPct"];
+const CLOUD_BT = { symbols: 10, days: 250 };
 async function runTool(name, input, state, changed) {
   const wl = state.config.watchlist;
   if (name === "search_stock") return { results: await searchStocks(String(input.query || ""), 10) };
@@ -116,7 +131,53 @@ async function runTool(name, input, state, changed) {
     if (removed.length) { changed.add("config"); changed.add("log"); addLog(`投資長移除追蹤：${removed.join("、")}`); }
     return { removed, watchlist: [...state.config.watchlist] };
   }
+  if (name === "set_watchlist") {
+    const ok = [], unknown = [];
+    for (const s of syms) { const hit = (await searchStocks(s, 5)).find((r) => r.code === s); if (hit) ok.push(`${s} ${hit.name}`); else unknown.push(s); }
+    if (!ok.length) return { error: "沒有有效代碼", notFound: unknown };
+    state.config.watchlist = ok.map((x) => x.split(" ")[0]);
+    changed.add("config"); changed.add("log"); addLog(`投資長重設追蹤清單：${ok.join("、")}`);
+    return { watchlist: ok, notFound: unknown };
+  }
   return { error: "未知的工具 " + name };
+}
+async function runSettingTool(name, input, state, changed) {
+  const c = state.config;
+  if (name === "get_settings") return { risk: c.risk, weights: c.weights, watchlist: c.watchlist, auto: c.auto, ai: { enabled: c.ai.enabled, model: c.ai.model } };
+  if (name === "set_risk") {
+    const before = { ...c.risk }, applied = {};
+    for (const [k, v] of Object.entries(input || {})) {
+      if (v == null) continue;
+      if (PCT_FIELDS.includes(k)) { const n = Number(v); if (!Number.isFinite(n) || n < 0 || n > 100) return { error: `${k} 要在 0～100` }; c.risk[k] = +(n / 100).toFixed(4); applied[k] = `${n}%`; }
+      else if (["buyThreshold", "sellThreshold", "maxPositions", "cooldownDays"].includes(k)) { c.risk[k] = Number(v); applied[k] = Number(v); }
+      else if (k === "lockStopLoss") { c.risk.lockStopLoss = Boolean(v); applied[k] = Boolean(v); }
+    }
+    if (!Object.keys(applied).length) return { error: "沒有可套用的欄位" };
+    changed.add("config"); changed.add("log");
+    addLog(`投資長修改風控：${Object.entries(applied).map(([k, v]) => `${k}=${v}`).join("、")}`);
+    return { applied, before, risk: c.risk };
+  }
+  if (name === "set_weights") {
+    const w = { ...c.weights };
+    for (const k of Object.keys(DEFAULT_WEIGHTS)) if (input?.[k] != null) w[k] = Math.max(0, Number(input[k]));
+    const sum = Object.keys(DEFAULT_WEIGHTS).reduce((t, k) => t + (w[k] ?? 0), 0) || 1;
+    for (const k of Object.keys(DEFAULT_WEIGHTS)) w[k] = +((w[k] ?? 0) / sum).toFixed(4);
+    c.weights = w; changed.add("config"); changed.add("log");
+    const txt = Object.keys(DEFAULT_WEIGHTS).map((k) => `${LABELS[k]} ${Math.round(w[k] * 100)}%`).join("、");
+    addLog(`投資長調整權重：${txt}`);
+    return { weights: txt };
+  }
+  if (name === "run_backtest") {
+    let symbols = (input?.symbols || []).map(String).filter((x) => /^\d{4,6}$/.test(x));
+    if (!symbols.length) symbols = [...new Set([...Object.keys(state.positions), ...c.watchlist])];
+    let days = Math.max(30, Number(input?.days) || 240);
+    if (isServerless) { symbols = symbols.slice(0, CLOUD_BT.symbols); days = Math.min(days, CLOUD_BT.days); }
+    const months = Math.ceil((days + 65) / 21) + 1; // 回測需要 65 天暖機
+    const r = await runBacktest({ symbols, cash: state.initialEquity || c.initialCash, days, risk: c.risk, fees: c.fees, months });
+    addLog(`投資長回測 ${symbols.length} 檔 ${days} 天：報酬 ${r.returnPct}%，回撤 ${r.maxDrawdownPct}%，0050 ${r.benchmarkReturnPct}%`); changed.add("log");
+    return { symbols: r.symbols, days: r.days, start: r.start, end: r.end, returnPct: r.returnPct, benchmarkReturnPct: r.benchmarkReturnPct, maxDrawdownPct: r.maxDrawdownPct, trades: r.trades, sells: r.sells, winRate: r.winRate, realized: r.realized, finalEquity: r.finalEquity, note: "只用技術線型分析師回測；籌碼、新聞、投顧沒有歷史快照" };
+  }
+  return null;
 }
 
 /**
@@ -151,7 +212,7 @@ export async function* chatStream({ state, history, model = "claude-opus-5-5", e
     const results = [];
     for (const u of uses) {
       let out;
-      try { out = await runTool(u.name, u.input, state, changed); } catch (e) { out = { error: e.message }; }
+      try { out = (await runSettingTool(u.name, u.input, state, changed)) ?? (await runTool(u.name, u.input, state, changed)); } catch (e) { out = { error: e.message }; }
       results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(out) });
     }
     messages.push({ role: "user", content: results });

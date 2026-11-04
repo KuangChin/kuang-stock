@@ -15,7 +15,7 @@ import { storage, isServerless, backend } from "./storage.js";
 import { authEnabled, verifySession, verifyCron, checkPassword, issueSession, sessionCookie, clearCookie, parseCookies, COOKIE } from "./auth.js";
 
 // 雲端上的回測／調參規模上限（完整規模請在本機用 npm run backtest）
-const CLOUD_LIMITS = { backtestSymbols: 4, backtestDays: 120, tuneTrials: 8 };
+const CLOUD_LIMITS = { backtestSymbols: 10, backtestDays: 250, tuneTrials: 8 };
 
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -101,7 +101,8 @@ export const routes = {
   "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
   "POST /api/backtest": async (u, body) => {
     if (isServerless) {
-      body = { ...body, symbols: (body.symbols || []).slice(0, CLOUD_LIMITS.backtestSymbols), days: Math.min(Number(body.days) || 120, CLOUD_LIMITS.backtestDays), months: 9 };
+      const days = Math.min(Number(body.days) || 120, CLOUD_LIMITS.backtestDays);
+      body = { ...body, symbols: (body.symbols || []).slice(0, CLOUD_LIMITS.backtestSymbols), days, months: Math.ceil((days + 65) / 21) + 1 };
     }
     return runBacktest(body);
   },
@@ -111,7 +112,8 @@ export const routes = {
     const trials = isServerless ? Math.min(body.trials || CLOUD_LIMITS.tuneTrials, CLOUD_LIMITS.tuneTrials) : body.trials || 40;
     const r = await tuneRisk({ symbols: isServerless ? symbols.slice(0, CLOUD_LIMITS.backtestSymbols) : symbols, cash: s.initialEquity || s.config.initialCash, days: Math.min(body.days || 120, isServerless ? CLOUD_LIMITS.backtestDays : 9999), baseRisk: s.config.risk, fees: s.config.fees, trials });
     if (body.apply !== false) {
-      const keep = { oddLot: s.config.risk.oddLot, minCashPct: s.config.risk.minCashPct, minOrderAmount: s.config.risk.minOrderAmount, maxPositions: s.config.risk.maxPositions };
+      const keep = { oddLot: s.config.risk.oddLot, minCashPct: s.config.risk.minCashPct, minOrderAmount: s.config.risk.minOrderAmount, maxPositions: s.config.risk.maxPositions, lockStopLoss: s.config.risk.lockStopLoss };
+      if (s.config.risk.lockStopLoss) keep.stopLossPct = s.config.risk.stopLossPct; // 投資長鎖定的停損不被調參改掉
       s.config.risk = { ...s.config.risk, ...r.best.risk, ...keep };
       addLog(`自動調參完成：回測 ${r.tried} 組，套用最佳參數（報酬 ${r.best.returnPct}%，回撤 ${r.best.maxDrawdownPct}%，原參數報酬 ${r.current.returnPct}%）`);
       await saveState(["config", "log"]);
