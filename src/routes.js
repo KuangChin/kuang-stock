@@ -46,7 +46,7 @@ export const routes = {
     const list = Array.isArray(body.transcripts) ? body.transcripts : [];
     let n = 0;
     for (const t of list) if (/^[\w-]{6,20}$/.test(t.videoId || "")) { await putTranscript(t.videoId, t.text); n++; }
-    await storage.cacheSet("advisors:lastPush", { t: taipeiNow(), stored: n, videos: list.map((t) => t.videoId).slice(0, 20) }).catch(() => {});
+    await storage.cacheSet("advisors:lastPush", { t: taipeiNow(), stored: n, videos: list.map((t) => t.videoId).slice(0, 20), report: body.report || null }).catch(() => {});
     return { ok: true, stored: n };
   },
   "GET /api/live": async () => { const [taifex, global] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]); return { t: taipeiNow(), taifex, global }; },
