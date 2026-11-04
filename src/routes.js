@@ -82,12 +82,16 @@ export const routes = {
    * - 排程（CRON_SECRET）：走 autoTick，自行判斷盤中／收盤／略過；收盤一天只跑一次
    */
   "POST /api/cycle": async (u, body, ctx) => {
-    if (ctx.cron) {
+    if (ctx.cron && !body.manual) {
       const r = await autoTick({ wait: true });
       return { ...r, time: taipeiNow(), cycle: r.cycle ? { tTaipei: r.cycle.tTaipei, source: r.cycle.source, durationMs: r.cycle.durationMs, trades: r.cycle.trades?.length || 0, decisions: r.cycle.decisions?.map((d) => `${d.symbol} ${d.action} ${d.shares}`) } : undefined };
     }
-    return runCycle({ execute: Boolean(body.execute), source: "manual" });
+    const r = await runCycle({ execute: Boolean(body.execute), source: "manual" });
+    if (ctx.cron) return { ok: true, tTaipei: r.tTaipei, durationMs: r.durationMs, aiError: r.aiError, advisors: r.advisors ? { items: r.advisors.items.length, transcripts: r.advisors.transcripts, model: r.advisors.model } : null, decisions: (r.decisions || []).map((d) => `${d.symbol} ${d.action}`) };
+    return r;
   },
+  // 排程密鑰可讀最近的系統日誌（排錯用）
+  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); return { log: (getState().log || []).slice(0, Number(u.searchParams.get("n") || 30)) }; },
   "POST /api/backtest": async (u, body) => {
     if (isServerless) {
       body = { ...body, symbols: (body.symbols || []).slice(0, CLOUD_LIMITS.backtestSymbols), days: Math.min(Number(body.days) || 120, CLOUD_LIMITS.backtestDays), months: 9 };
@@ -174,7 +178,7 @@ export async function handleApi(req) {
   if (!handler) return { status: 404, headers: {}, body: { error: "not found" } };
   const h = (k) => (req.headers.get ? req.headers.get(k) : req.headers[k]) || "";
   const cookies = parseCookies(h("cookie"));
-  const cron = (key === "POST /api/cycle" || key === "POST /api/advisors/transcripts" || key === "GET /api/advisors/items") && verifyCron(req.headers);
+  const cron = ["POST /api/cycle", "POST /api/advisors/transcripts", "GET /api/advisors/items", "GET /api/log"].includes(key) && verifyCron(req.headers);
   const open = key === "POST /api/login" || key === "GET /api/health";
   // 雲端一定要設密碼，否則任何人都能看持股、用掉 Claude 額度
   if (isServerless && !authEnabled() && key !== "GET /api/health") return { status: 503, headers: {}, body: { error: "APP_PASSWORD 未設定，請在 Vercel 環境變數加入後重新部署" } };
