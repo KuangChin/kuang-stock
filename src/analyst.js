@@ -71,6 +71,8 @@ function buildPrompt(snapshot) {
     for (const it of adv.items) if (it.summary) lines.push(`- ${it.sourceName} ${(it.published || "").slice(5, 10)}「${it.title.slice(0, 40)}」${{ bullish: "偏多", bearish: "偏空", neutral: "中性" }[it.stance] || ""}：${it.summary}${it.stocks?.length ? "；提到 " + it.stocks.map((s) => `${s.name}${{ bullish: "看多", bearish: "看空", neutral: "中性" }[s.stance]}`).join("、") : ""}`);
   }
   lines.push(`\n總經/世界新聞：\n` + (snapshot.macroNews || []).slice(0, 12).map((n) => `- [${n.source}] ${n.title}`).join("\n"));
+  const rd = snapshot.radar;
+  if (rd?.items?.length) lines.push(`\n飆股雷達（${rd.date}，全市場掃描，供參考，不在追蹤清單的不能下單）：${rd.items.filter((x) => x.pick && x.pick.verdict !== "避開").slice(0, 6).map((x) => `${x.symbol} ${x.name}（${x.pick.verdict}：${x.pick.reason}）`).join("；") || "投資長未挑出"}`);
   lines.push(`\n請以投資長角度主持委員會：先在 discussion 給六位分析師（含投顧）各一句話結論，再綜合給每個標的 BUY/SELL/HOLD 決策，最後在 action_plan 用 1-3 句明確告訴投資人該做什麼。這是模擬帳戶，請遵守風控參數，避免過度交易；沒有明確理由就 HOLD。`);
   return lines.join("\n");
 }

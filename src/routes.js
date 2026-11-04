@@ -3,6 +3,7 @@
 import { loadState, getState, saveState, resetState, addLog, runWithState, enterState } from "./store.js";
 import { runCycle, symbolDetail, autoTick } from "./engine.js";
 import { runBacktest, normalizeRange } from "./backtest.js";
+import { runRadar } from "./radar.js";
 import { tuneRisk } from "./tuner.js";
 import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow, getListing } from "./twse.js";
 import { executeOrder, valuation, marginRatio } from "./portfolio.js";
@@ -25,7 +26,7 @@ export function publicState() {
   const s = getState();
   return {
     config: s.config, cash: s.cash, initialEquity: s.initialEquity ?? s.config.initialCash, positions: s.positions,
-    trades: s.trades.slice(0, 200), equity: s.equity.slice(-2000), lastCycle: s.lastCycle, log: s.log.slice(0, 100),
+    trades: s.trades.slice(0, 200), equity: s.equity.slice(-2000), lastCycle: s.lastCycle, radar: s.radar || null, log: s.log.slice(0, 100),
     marketOpen: isMarketOpen(), now: taipeiNow(), aiAvailable: aiAvailable(),
     runtime: { serverless: isServerless, backend, auth: authEnabled(), cloudLimits: isServerless ? CLOUD_LIMITS : null },
   };
@@ -63,6 +64,7 @@ export const routes = {
     const c = s.config;
     if (body.risk) c.risk = { ...c.risk, ...body.risk };
     if (body.margin) c.margin = { ...c.margin, ...body.margin };
+    if (body.radar) c.radar = { ...c.radar, ...body.radar };
     if (body.weights) c.weights = { ...c.weights, ...body.weights };
     if (body.auto) c.auto = { ...c.auto, ...body.auto };
     if (body.ai) c.ai = { ...c.ai, ...body.ai };
@@ -102,6 +104,20 @@ export const routes = {
   },
   // 排程密鑰可讀最近的系統日誌（排錯用）
   "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
+  // 飆股雷達：掃全市場找有飆股訊號的股票，投資長挑選。頁面載入時若超過 20 小時沒掃會自動觸發；排程也可叫（收盤後）
+  "GET /api/radar": async () => ({ radar: getState().radar || null }),
+  "POST /api/radar": async (u, body, ctx) => {
+    const s = getState();
+    if (!body.force && s.radar?.t && Date.now() - new Date(s.radar.t) < 30 * 60 * 1000) return { radar: s.radar, cached: true };
+    if (isServerless && !(await storage.lock("radar", 240))) throw new HttpError(409, "雷達正在掃描中，請稍後再看");
+    try {
+      const r = await runRadar(s.config.radar, { model: s.config.ai.model || "claude-opus-5-5", effort: "low" });
+      s.radar = r;
+      addLog(`飆股雷達：掃 ${r.universe} 檔，${r.candidates} 檔有訊號，投資長挑 ${(r.items || []).filter((x) => x.pick && x.pick.verdict !== "避開").length} 檔（${Math.round(r.durationMs / 1000)} 秒）`);
+      await saveState(["radar", "log"]);
+      return ctx.cron ? { ok: true, date: r.date, universe: r.universe, candidates: r.candidates, picks: r.items.filter((x) => x.pick).map((x) => `${x.symbol} ${x.name} ${x.pick.verdict}`) } : { radar: r };
+    } finally { if (isServerless) await storage.unlock("radar").catch(() => {}); }
+  },
   // 時間段兩種給法：days（最近 N 個交易日）或 from/to（YYYY-MM-DD）
   "POST /api/backtest": async (u, body) => {
     const { from, to } = normalizeRange(body);
@@ -195,7 +211,7 @@ export async function handleApi(req) {
   if (!handler) return { status: 404, headers: {}, body: { error: "not found" } };
   const h = (k) => (req.headers.get ? req.headers.get(k) : req.headers[k]) || "";
   const cookies = parseCookies(h("cookie"));
-  const cron = ["POST /api/cycle", "POST /api/advisors/transcripts", "GET /api/advisors/items", "GET /api/log"].includes(key) && verifyCron(req.headers);
+  const cron = ["POST /api/cycle", "POST /api/advisors/transcripts", "GET /api/advisors/items", "GET /api/log", "POST /api/radar"].includes(key) && verifyCron(req.headers);
   const open = key === "POST /api/login" || key === "GET /api/health";
   // 雲端一定要設密碼，否則任何人都能看持股、用掉 Claude 額度
   if (isServerless && !authEnabled() && key !== "GET /api/health") return { status: 503, headers: {}, body: { error: "APP_PASSWORD 未設定，請在 Vercel 環境變數加入後重新部署" } };

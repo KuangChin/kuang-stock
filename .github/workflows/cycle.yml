@@ -21,3 +21,11 @@ jobs:
             --max-time 330 \
             -d '{}' | tee result.json
           echo; echo "reason: $(jq -r .reason result.json)"
+      - name: Breakout radar after close (14:15 run only)
+        if: github.event.schedule == '15 6 * * 1-5' || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -fsS -X POST "${{ secrets.APP_URL }}/api/radar" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --max-time 330 \
+            -d '{"force":true}' | head -c 600; echo

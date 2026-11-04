@@ -1,5 +1,6 @@
 import { DEFAULT_RISK } from "./strategy.js";
 import { DEFAULT_MARGIN } from "./portfolio.js";
+import { DEFAULT_RADAR } from "./radar.js";
 import { DEFAULT_WEIGHTS } from "./analysts/index.js";
 import { storage } from "./storage.js";
 
@@ -14,6 +15,7 @@ export function defaultState() {
       fees: { commission: 0.001425, minFee: 20, tax: 0.003, discount: 0.6 },
       risk: { ...DEFAULT_RISK },
       margin: { ...DEFAULT_MARGIN }, // 融資：成數、利率、維持率
+      radar: { ...DEFAULT_RADAR },   // 飆股雷達：篩選門檻與投資長自己的方法
       weights: { ...DEFAULT_WEIGHTS },
       auto: { enabled: false, intervalMin: 5, executeOnClose: true },
       watchlist: ["2330", "2317", "2454", "0050", "2603", "2881"],
@@ -25,6 +27,7 @@ export function defaultState() {
     trades: [],    // {t, symbol, name, side, shares, price, fee, tax, amount, reason, source}
     equity: [],    // {t, total, cash, marketValue}
     lastCycle: null,
+    radar: null,   // 最近一次飆股雷達結果
     log: [],
   };
 }
@@ -42,7 +45,7 @@ const current = () => als.getStore()?.state ?? moduleState;
 export function mergeDefaults(loaded) {
   const d = defaultState();
   const c = loaded.config || {};
-  loaded.config = { ...d.config, ...c, fees: { ...d.config.fees, ...c.fees }, risk: { ...d.config.risk, ...c.risk }, margin: { ...d.config.margin, ...c.margin }, weights: { ...d.config.weights, ...c.weights }, auto: { ...d.config.auto, ...c.auto }, ai: { ...d.config.ai, ...c.ai } };
+  loaded.config = { ...d.config, ...c, fees: { ...d.config.fees, ...c.fees }, risk: { ...d.config.risk, ...c.risk }, margin: { ...d.config.margin, ...c.margin }, radar: { ...d.config.radar, ...c.radar }, weights: { ...d.config.weights, ...c.weights }, auto: { ...d.config.auto, ...c.auto }, ai: { ...d.config.ai, ...c.ai } };
   return loaded;
 }
 

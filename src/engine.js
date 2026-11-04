@@ -102,7 +102,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
     // --- AI 分析師 ---
     let ai = null, aiError = null;
     const snapshot = {
-      time: taipeiNow(), marketOpen, indices, global, taifex, macro, macroSentiment, macroNews, advisors, valuation: val, risk: state.config.risk, margin: state.config.margin, weights: state.config.weights,
+      time: taipeiNow(), marketOpen, indices, global, taifex, macro, macroSentiment, macroNews, advisors, valuation: val, risk: state.config.risk, margin: state.config.margin, weights: state.config.weights, radar: state.radar ? { date: state.radar.date, items: state.radar.items } : null,
       analyses: Object.values(analyses).map(({ series, quote, ...rest }) => rest),
     };
     await writeSnapshot(snapshot).catch(() => {});

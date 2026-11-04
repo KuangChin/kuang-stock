@@ -53,6 +53,7 @@ function render() {
     ? tile("總資產", fmt(v.total), `累積報酬 ${sign(v.returnPct, 2, "%")}${v.loan ? "，已扣融資" : ""}`, cls(v.returnPct)) + tile("現金", fmt(v.cash), `占 ${fmt((v.cash / v.total) * 100, 1)}%`) + tile("持股市值", fmt(v.marketValue), `${Object.keys(S.positions).length} 檔`) + (v.loan ? tile("融資餘額", fmt(v.loan), `未付利息 ${fmt(v.interest)}`) + tile("整戶維持率", fmt(v.maintenance, 1) + "%", v.marginCall ? `低於追繳線 ${v.maintenanceLine}%` : `追繳線 ${v.maintenanceLine}%`, v.marginCall ? "alert" : v.maintenance < v.maintenanceLine + 20 ? "caution" : "") : "") + tile("未實現損益", sign(v.unrealized), "", cls(v.unrealized)) + tile("今日損益", sign(v.dayPnl), "", cls(v.dayPnl)) + tile("已實現損益", sign(v.realized), `${S.trades.length} 筆交易`, cls(v.realized)) + (idx ? tile("加權指數", fmt(idx.price), `${sign(idx.change)} (${sign(idx.changePct, 2, "%")})`, cls(idx.change)) : "")
     : tile("總資產", fmt(S.cash), "尚未執行分析") + tile("現金", fmt(S.cash)) + tile("持股", Object.keys(S.positions).length + " 檔");
 
+  renderRadar();
   // 資產曲線
   const eq = S.equity;
   $("#equityNote").textContent = eq.length ? `${eq.length} 個記錄點，起始 ${fmt(S.initialEquity)}` : "執行分析後開始記錄";
@@ -106,7 +107,36 @@ function scoreBar(s) { const pct = Math.min(Math.abs(s) / 8, 1) * 50; const left
 const newsLi = (n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a><span class="sent ${cls(n.sentiment)}">${n.sentiment > 0 ? "▲偏多" : n.sentiment < 0 ? "▼偏空" : ""}</span><div class="meta">${esc(n.source)} · ${timeStr(n.pubDate)}</div></li>`;
 
 // ---------- 動作 ----------
-async function refresh() { S = await api("/api/state"); render(); }
+async function refresh() { S = await api("/api/state"); render(); maybeRadar(); }
+
+// ---------- 飆股雷達 ----------
+let radarBusy = false;
+const VERDICT = { 強: "up", 可追: "up", 觀察: "", 避開: "down" };
+function renderRadar() {
+  const r = S.radar;
+  const note = $("#radarNote");
+  if (!r) { note.textContent = radarBusy ? "掃描中（全市場約 1～2 分鐘）…" : "尚未掃描"; $("#radarTable tbody").innerHTML = '<tr><td colspan="9" class="muted">每天收盤後掃全市場上市＋上櫃，找突破、爆量、法人追買的股票，由投資長挑選。</td></tr>'; return; }
+  const d = r.date ? `${r.date.slice(4, 6)}/${r.date.slice(6)}` : "";
+  note.textContent = `${d} 收盤資料，掃 ${fmt(r.universe)} 檔、${r.candidates} 檔有訊號${r.ai?.error ? "，投資長挑選失敗" : ""}${radarBusy ? "，重新掃描中…" : ""}`;
+  $("#radarOverview").textContent = r.overview || "";
+  const items = [...(r.items || [])].sort((a, b) => (b.pick ? 1 : 0) - (a.pick ? 1 : 0) || b.score - a.score);
+  $("#radarTable tbody").innerHTML = items.map((x) => `<tr class="clickable" data-sym="${x.symbol}"><td>${x.symbol}</td><td>${esc(x.name)}<span class="muted small"> ${x.market === "otc" ? "櫃" : "市"}</span></td><td class="num">${fmt(x.price, 2)}</td><td class="num ${cls(x.changePct)}">${sign(x.changePct, 2, "%")}</td><td class="num ${cls(x.ret5)}">${sign(x.ret5, 1, "%")}</td><td class="num">${fmt(x.volRatio, 1)}x</td><td class="wrap">${x.signals.map((t) => `<span class="chip">${esc(t)}</span>`).join(" ")}</td><td class="wrap">${x.pick ? `<b class="${VERDICT[x.pick.verdict] || ""}">${esc(x.pick.verdict)}</b> ${esc(x.pick.reason)}` : '<span class="muted">—</span>'}</td><td>${S.config.watchlist.includes(x.symbol) ? '<span class="muted small">追蹤中</span>' : `<button class="btn ghost small" data-watch="${x.symbol}" type="button">加入追蹤</button>`}</td></tr><tr class="sub clickable" data-sym="${x.symbol}"><td colspan="9"><div class="subtx">${x.signals.map((t) => `<span class="chip">${esc(t)}</span>`).join(" ")}${x.pick ? `<div><b class="${VERDICT[x.pick.verdict] || ""}">${esc(x.pick.verdict)}</b> ${esc(x.pick.reason)}</div>` : ""}</div></td></tr>`).join("") || '<tr><td colspan="9" class="muted">今天沒有達到門檻的股票。</td></tr>';
+}
+async function runRadar(force = false) {
+  if (radarBusy) return;
+  radarBusy = true; renderRadar();
+  try { const r = await api("/api/radar", { force }); if (r.radar) S.radar = r.radar; }
+  catch (e) { toast("飆股雷達失敗：" + e.message, 6000); }
+  finally { radarBusy = false; renderRadar(); }
+}
+function maybeRadar() { const t = S?.radar?.t ? new Date(S.radar.t).getTime() : 0; if (!radarBusy && Date.now() - t > 20 * 3600e3) runRadar(false); }
+$("#btnRadar").onclick = () => runRadar(true);
+$("#radarTable").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-watch]"); if (!b) return;
+  e.stopPropagation(); b.disabled = true;
+  try { S = await api("/api/config", { watchlist: [...S.config.watchlist, b.dataset.watch] }); toast(`${b.dataset.watch} 已加入追蹤，下一輪分析納入`); render(); }
+  catch (err) { toast("加入失敗：" + err.message, 5000); b.disabled = false; }
+}, true);
 async function runCycle(execute) {
   if (busy) return; setBusy(true); toast(execute ? "分析中，完成後將模擬下單…" : "分析中…", 8000);
   try { await api("/api/cycle", { execute }); await refresh(); const n = S.lastCycle?.trades?.length || 0; toast(execute ? `完成：模擬成交 ${n} 筆` : "分析完成"); }

@@ -10,6 +10,7 @@ import { DEFAULT_WEIGHTS, LABELS } from "./analysts/index.js";
 import { getTaifex } from "./taifex.js";
 import { getGlobalMarkets } from "./yahoo.js";
 import { getSeries, summarizeSeries, SERIES } from "./history.js";
+import { runRadar, DEFAULT_RADAR } from "./radar.js";
 
 export const CHAT_MAX = 40; // 保留的對話則數
 const sign = (v, d = 1) => (v == null ? "--" : (v > 0 ? "+" : "") + Number(v).toFixed(d));
@@ -23,6 +24,9 @@ const SYSTEM = `你是「投資長」，主持一個台股模擬交易帳戶的�
    六位分析師的權重（set_weights）、融資設定（set_margin：開關、成數、利率、追繳維持率、是否自動斷頭）、跑回測（run_backtest）、查目前設定（get_settings）。對方給的是名稱時先用 search_stock 查到正確代碼。
    融資開著時要提醒槓桿：虧損以自備款計會放大，維持率接近追繳線要先減碼，不要等斷頭。
    對方問過去一段時間的走勢（加權指數、台指期、費半、S&P 500、VIX、匯率、個股）時，用 get_history 拿日線摘要再回答，不要說拿不到。
+   飆股雷達：頁面有一欄「飆股雷達」，每天掃全市場找有飆股訊號的股票，由你挑選並寫一句理由。對方要你「建立／修改找飆股的方法」時，
+   把方法寫成條件存進 set_radar 的 notes（之後每次掃描都會照這個方法挑），門檻（最低股價、日均成交額、量比、5 日漲幅）也用 set_radar 調；
+   要立刻重掃用 run_radar（約 1～2 分鐘）。背景資料裡有最近一次雷達結果，可以直接討論。
    對方要「鎖定某個族群」時，自己挑出該族群在台股的代表性標的（用 search_stock 確認代碼），用 set_watchlist 整份換掉，並說明挑了哪些、為什麼。
    改完用幾句話回報改了什麼、現在的值是多少。回測結果要講報酬、最大回撤、交易次數、與 0050 同期比較，並給一句評語。追蹤清單的股票會在下一輪分析納入。
 4. 回答長度看問題：閒聊或簡單問題兩三句就好；分析類問題用短段落或條列，不要超過 300 字，除非對方要求詳細。
@@ -51,6 +55,12 @@ export function buildContext(state) {
   const trades = state.trades.slice(0, 8);
   if (trades.length) { L.push(`最近交易：`); for (const t of trades) L.push(`- ${t.t.slice(0, 16).replace("T", " ")} ${t.side} ${t.symbol} ${t.name} ${t.shares} 股 @ ${t.price}（${t.source}）${t.reason ? "：" + t.reason : ""}`); }
 
+  const rd = state.radar;
+  if (rd?.items?.length) {
+    L.push(`\n# 飆股雷達（${rd.date} 收盤資料，掃 ${rd.universe} 檔，${rd.candidates} 檔有訊號）${state.config.radar?.notes ? "；你的方法：" + state.config.radar.notes.slice(0, 300) : ""}`);
+    if (rd.overview) L.push(rd.overview);
+    for (const x of rd.items.slice(0, 12)) L.push(`- ${x.symbol} ${x.name}：收 ${x.price}（${sign(x.changePct, 2)}%），5日 ${sign(x.ret5, 1)}%，量比 ${x.volRatio}x，${x.signals.join("、")}${x.pick ? `；你的判定「${x.pick.verdict}」：${x.pick.reason}` : ""}`);
+  }
   if (!lc) { L.push(`\n# 尚未執行過分析，沒有委員會資料。`); return L.join("\n"); }
   L.push(`\n# 最近一輪分析（${lc.tTaipei}，${lc.marketOpen ? "盤中" : "盤後"}，${lc.executed ? "已模擬下單" : "僅建議"}，來源 ${lc.source}）`);
   const idx = lc.indices?.taiex, otc = lc.indices?.otc;
@@ -111,6 +121,8 @@ const TOOLS = [
   { name: "get_settings", description: "讀目前的風控參數、分析師權重、追蹤清單、自動執行與 AI 設定。", input_schema: { type: "object", properties: {} } },
   { name: "set_risk", description: "修改風控參數，只需給要改的欄位。百分比欄位用 0～100 的數字（停損 30 代表 30%；單一持股不設限給 maxPositionPct 100）。lockStopLoss=true 表示停損固定，自動調參不得更動。", input_schema: { type: "object", properties: { stopLossPct: { type: "number" }, takeProfitPct: { type: "number" }, maxPositionPct: { type: "number" }, perTradePct: { type: "number" }, minCashPct: { type: "number" }, buyThreshold: { type: "number", description: "綜合分數 -8～+8，達此值買進" }, sellThreshold: { type: "number" }, maxPositions: { type: "integer" }, cooldownDays: { type: "integer" }, lockStopLoss: { type: "boolean" } } } },
   { name: "set_weights", description: "調整六位分析師的權重（technical 技術、fundamental 基本面、chips 籌碼、macro 總經、sentiment 情緒、advisor 投顧），用 0～100 的數字，只需給要改的；系統會自動把總和正規化成 100%。", input_schema: { type: "object", properties: { technical: { type: "number" }, fundamental: { type: "number" }, chips: { type: "number" }, macro: { type: "number" }, sentiment: { type: "number" }, advisor: { type: "number" } } } },
+  { name: "set_radar", description: "修改飆股雷達的方法與門檻，只給要改的欄位：notes 投資長自己的飆股方法（文字，會逐字交給之後每次掃描時的挑選）；topN 顯示幾檔；minPrice 最低股價；minAmount 最低 20 日平均成交金額（元）；volumeMult 放量倍數；ret5Min 5 日漲幅門檻（%）；excludeEtf 排除 ETF；aiPick 是否由投資長挑選。", input_schema: { type: "object", properties: { notes: { type: "string" }, topN: { type: "integer" }, minPrice: { type: "number" }, minAmount: { type: "number" }, volumeMult: { type: "number" }, ret5Min: { type: "number" }, excludeEtf: { type: "boolean" }, aiPick: { type: "boolean" } } } },
+  { name: "run_radar", description: "立刻重新掃描飆股雷達（全市場上市＋上櫃，約 1～2 分鐘），回傳有訊號的股票與你的挑選。", input_schema: { type: "object", properties: {} } },
   { name: "set_margin", description: "修改融資設定，只給要改的欄位：enabled 開關；ratioTse 上市成數、ratioOtc 上櫃成數、interestRate 年利率、maintenance 追繳維持率，都用 0～200 的百分比數字（上市 60 代表六成、利率 6.5、維持率 130）；forceSell 低於追繳線是否自動斷頭。", input_schema: { type: "object", properties: { enabled: { type: "boolean" }, ratioTse: { type: "number" }, ratioOtc: { type: "number" }, interestRate: { type: "number" }, maintenance: { type: "number" }, forceSell: { type: "boolean" } } } },
   { name: "get_history", description: "拿日線歷史摘要（報酬、高低點與日期、最大回撤、均線、約 50 個取樣點）。series 可多個：taiex 加權指數、tx 台指期近月連續、sox 費城半導體、sp500、nasdaq、vix、usdtwd 美元台幣、us10y 美債十年、dxy 美元指數、tsm 台積電ADR、nvda，或 4～6 位數台股代碼。時間段用 days（預設 240 個交易日）或 from/to（YYYY-MM-DD）。", input_schema: { type: "object", properties: { series: { type: "array", items: { type: "string" } }, days: { type: "integer" }, from: { type: "string" }, to: { type: "string" } }, required: ["series"] } },
   { name: "run_backtest", description: "用目前風控參數回測（只用技術線型分析師，沒有籌碼與新聞的歷史）。時間段兩種給法：days（最近 N 個交易日，預設 240）或 from/to（YYYY-MM-DD，指定起迄日期，例如「跑 2025 上半年」就是 from 2025-01-01、to 2025-06-30；只給 from 就跑到今天）。symbols 不給就用追蹤清單＋持股。要花 30～120 秒。", input_schema: { type: "object", properties: { days: { type: "integer" }, from: { type: "string", description: "起日 YYYY-MM-DD" }, to: { type: "string", description: "迄日 YYYY-MM-DD" }, symbols: { type: "array", items: { type: "string" } } } } },
@@ -151,7 +163,26 @@ async function runTool(name, input, state, changed) {
 }
 async function runSettingTool(name, input, state, changed) {
   const c = state.config;
-  if (name === "get_settings") return { risk: c.risk, margin: c.margin, weights: c.weights, watchlist: c.watchlist, auto: c.auto, ai: { enabled: c.ai.enabled, model: c.ai.model } };
+  if (name === "get_settings") return { risk: c.risk, margin: c.margin, radar: c.radar, weights: c.weights, watchlist: c.watchlist, auto: c.auto, ai: { enabled: c.ai.enabled, model: c.ai.model } };
+  if (name === "set_radar") {
+    const r = c.radar = { ...DEFAULT_RADAR, ...c.radar }, applied = {};
+    for (const [k, v] of Object.entries(input || {})) {
+      if (v == null) continue;
+      if (k === "notes") { r.notes = String(v).slice(0, 2000); applied.notes = r.notes.length + " 字"; }
+      else if (["topN", "minPrice", "minAmount", "volumeMult", "ret5Min"].includes(k)) { const n = Number(v); if (!Number.isFinite(n) || n < 0) return { error: `${k} 要是正數` }; r[k] = k === "topN" ? Math.min(30, Math.max(3, Math.round(n))) : n; applied[k] = r[k]; }
+      else if (k === "excludeEtf" || k === "aiPick") { r[k] = Boolean(v); applied[k] = Boolean(v); }
+    }
+    if (!Object.keys(applied).length) return { error: "沒有可套用的欄位" };
+    changed.add("config"); changed.add("log");
+    addLog(`投資長修改飆股雷達：${Object.entries(applied).map(([k, v]) => `${k}=${v}`).join("、")}`);
+    return { applied, radar: r, note: "下次掃描生效；要立刻看結果用 run_radar" };
+  }
+  if (name === "run_radar") {
+    const r = await runRadar(c.radar, { model: c.ai.model || "claude-opus-5-5", effort: "low" });
+    state.radar = r; changed.add("radar"); changed.add("log");
+    addLog(`投資長重掃飆股雷達：${r.candidates} 檔有訊號，挑 ${r.items.filter((x) => x.pick).length} 檔`);
+    return { date: r.date, universe: r.universe, candidates: r.candidates, overview: r.overview, items: r.items.map((x) => ({ symbol: x.symbol, name: x.name, price: x.price, changePct: x.changePct, ret5: x.ret5, ret20: x.ret20, volRatio: x.volRatio, signals: x.signals, pick: x.pick })) };
+  }
   if (name === "set_margin") {
     const m = c.margin = { ...c.margin }, applied = {};
     for (const [k, v] of Object.entries(input || {})) {
@@ -270,5 +301,8 @@ function progressLabel(name, input = {}) {
   if (name === "set_weights") return "調整分析師權重…";
   if (name === "search_stock") return `查 ${input.query || ""}…`;
   if (name === "get_settings") return "讀取目前設定…";
+  if (name === "set_margin") return "修改融資設定…";
+  if (name === "set_radar") return "更新飆股雷達的方法…";
+  if (name === "run_radar") return "重新掃描全市場飆股（約 1～2 分鐘）…";
   return "更新追蹤清單…";
 }
