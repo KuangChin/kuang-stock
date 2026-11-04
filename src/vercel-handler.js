@@ -1,5 +1,5 @@
-// Vercel catch-all function：所有 /api/* 都由同一份路由表處理（src/routes.js）
-import { handleApi } from "../src/routes.js";
+// Vercel function 共用入口：api/[a].js 與 api/[a]/[b].js 都轉到這裡（Vercel 的 api/ 目錄不吃 [...path] 多層 catch-all，只會當成單層）
+import { handleApi } from "./routes.js";
 
 export const config = { supportsResponseStreaming: true };
 

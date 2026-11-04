@@ -90,7 +90,7 @@ node src/cli.js backtest 2330,2317,2454 1000000 120
 
 ## 部署到 Vercel（手機不用 VPN）
 
-架構：GitHub → Vercel（`api/[...path].js` 一支 catch-all function 提供 API，`public/` 當靜態檔，
+架構：GitHub → Vercel（`api/[a].js、api/[a]/[b].js` 一支 catch-all function 提供 API，`public/` 當靜態檔，
 `middleware.js` 在 Edge 擋未登入的頁面）＋ Upstash Redis 存狀態與快取 ＋ GitHub Actions 每 5 分鐘呼叫 `/api/cycle`。
 程式會自動判斷：有 Redis 環境變數就用 Redis，否則存本機 `data/`，所以本機 `npm start` 照常。
 
@@ -165,7 +165,7 @@ src/chat.js        投資長對話（背景整理 + Claude 串流）
 src/storage.js     儲存 adapter：Upstash Redis（雲端）或 data/（本機）
 src/routes.js      共用路由表 + 登入／排程驗證
 src/auth.js        密碼登入、HMAC 簽章 cookie（Node 與 Edge 共用）
-api/[...path].js   Vercel catch-all function
+api/[a].js、api/[a]/[b].js   Vercel catch-all function
 middleware.js      Vercel Edge：未登入導向 /login.html
 scripts/migrate-state.mjs  把 data/state.json 匯入 Redis
 .github/workflows/cycle.yml  排程呼叫 /api/cycle
