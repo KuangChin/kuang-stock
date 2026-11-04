@@ -1,4 +1,4 @@
-// 本機抓投顧 YouTube 字幕（yt-dlp），推到雲端讓 Vercel 上的分析也看得到完整內容。
+// 抓投顧 YouTube 字幕（yt-dlp），推到雲端讓 Vercel 上的分析也看得到完整內容；本機或 GitHub Actions 都能跑。
 // 用法：APP_URL=https://kuang-stock.vercel.app CRON_SECRET=... npm run advisors-push
 // （兩個值也可以放在 .env）
 import { loadEnv } from "../src/env.js";
