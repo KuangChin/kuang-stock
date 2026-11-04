@@ -214,6 +214,13 @@ async function summarize(items, symbols, names, { model, effort }) {
   return { ...res.parsed_output, model: res.model, usage: res.usage };
 }
 
+/** 個股明細用：只讀最近一次整理好的結果，不另外叫 Claude（開新股票不用等 30 秒） */
+export async function getAdvisorViewsCached(symbols) {
+  const latest = await storage.cacheGet("advisors:latest", 2 * 86400e3).catch(() => null);
+  if (!latest) return null;
+  return { ...latest, cached: true, bySymbol: Object.fromEntries(Object.entries(latest.bySymbol || {}).filter(([s]) => symbols.includes(s))) };
+}
+
 /**
  * 給分析流程用：回 { t, items, market, bySymbol, model, transcripts }
  * symbols/names：目前追蹤的標的；config：state.config（可含 advisors 自訂來源與 model）

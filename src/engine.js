@@ -2,7 +2,7 @@
 import { getQuotes, getIndexQuotes, getDailyHistory, isMarketOpen, taipeiNow, getListing, getInstitutional, getMargin, getValuation, getRevenue } from "./twse.js";
 import { getGlobalMarkets } from "./yahoo.js";
 import { getTaifex } from "./taifex.js";
-import { getAdvisorViews } from "./advisors.js";
+import { getAdvisorViews, getAdvisorViewsCached } from "./advisors.js";
 import { computeIndicators } from "./indicators.js";
 import { gatherNews, aggregateSentiment } from "./news.js";
 import { decide } from "./strategy.js";
@@ -33,7 +33,7 @@ function mergeToday(bars, q) {
   return [...bars, { date: q.date, open: q.open ?? q.price, high: q.high ?? q.price, low: q.low ?? q.price, close: q.price, volume: q.volume ?? 0, live: true }];
 }
 
-export async function analyzeSymbols(symbols, { withNews = true } = {}) {
+export async function analyzeSymbols(symbols, { withNews = true, advisorsCached = false } = {}) {
   const state = getState();
   const listing = await getListing();
   const quotes = await getQuotes(symbols);
@@ -48,7 +48,7 @@ export async function analyzeSymbols(symbols, { withNews = true } = {}) {
     getMargin(symbols).catch(() => ({})),
     getValuation(symbols).catch(() => ({})),
     getRevenue(symbols).catch(() => ({})),
-    getAdvisorViews(symbols, names, state.config).catch((e) => { addLog("投顧觀點取得失敗：" + e.message, "warn"); return null; }),
+    advisorsCached ? getAdvisorViewsCached(symbols).catch(() => null) : getAdvisorViews(symbols, names, state.config).catch((e) => { addLog("投顧觀點取得失敗：" + e.message, "warn"); return null; }),
   ]);
   const macroSent = aggregateSentiment(news.macro);
   const macro = analyzeMarket({ indices, global, taifex, macroSentiment: macroSent.score });
@@ -156,7 +156,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
 }
 
 export async function symbolDetail(symbol) {
-  const { analyses, indices, macro, global, taifex, advisors } = await analyzeSymbols([symbol]);
+  const { analyses, indices, macro, global, taifex, advisors } = await analyzeSymbols([symbol], { advisorsCached: true });
   const a = analyses[symbol];
   return { ...a, indices, macro, global, taifex, advisors };
 }
