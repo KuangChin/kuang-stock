@@ -24,4 +24,4 @@ if (!transcripts.length) { console.log("沒有字幕可推送"); process.exit(0)
 const r = await fetch(`${APP_URL}/api/advisors/transcripts`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${SECRET}` }, body: JSON.stringify({ transcripts }) });
 const j = await r.json().catch(() => ({}));
 if (!r.ok) { console.error("推送失敗", r.status, j); process.exit(1); }
-console.log(`已推送 ${j.stored} 集字幕到 ${APP_URL}；下一輪雲端分析會用到。`);
+console.log(`已推送 ${j.stored} 集字幕到 ${APP_URL}；下一輪雲端分析會用到。字幕總字數 ${transcripts.reduce((t, x) => t + x.text.length, 0)}`);

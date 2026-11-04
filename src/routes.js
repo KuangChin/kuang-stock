@@ -46,6 +46,7 @@ export const routes = {
     const list = Array.isArray(body.transcripts) ? body.transcripts : [];
     let n = 0;
     for (const t of list) if (/^[\w-]{6,20}$/.test(t.videoId || "")) { await putTranscript(t.videoId, t.text); n++; }
+    await storage.cacheSet("advisors:lastPush", { t: taipeiNow(), stored: n, videos: list.map((t) => t.videoId).slice(0, 20) }).catch(() => {});
     return { ok: true, stored: n };
   },
   "GET /api/live": async () => { const [taifex, global] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]); return { t: taipeiNow(), taifex, global }; },
@@ -150,7 +151,7 @@ export const routes = {
   "POST /api/logout": async (u, body, ctx) => { ctx.setHeader("Set-Cookie", clearCookie()); return { ok: true }; },
   // 不用登入；順便探測證交所是否能從這個機房連到（部署後驗收用）
   "GET /api/health": async (u) => {
-    const out = { ok: true, time: taipeiNow(), backend, serverless: isServerless, auth: authEnabled(), cron: Boolean(process.env.CRON_SECRET), commit: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7), lastCycle: getState()?.lastCycle?.tTaipei || null, hasTaifex: Boolean(getState()?.lastCycle?.taifex) };
+    const out = { ok: true, time: taipeiNow(), backend, serverless: isServerless, auth: authEnabled(), cron: Boolean(process.env.CRON_SECRET), commit: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7), lastCycle: getState()?.lastCycle?.tTaipei || null, advisorPush: (await storage.cacheGet("advisors:lastPush").catch(() => null)) || null, hasTaifex: Boolean(getState()?.lastCycle?.taifex) };
     if (u.searchParams.has("probe")) {
       const t0 = Date.now();
       try { const q = (await getQuotes(["2330"]))["2330"]; out.twse = q?.price ? `ok ${q.name} ${q.price}` : "no data"; }
