@@ -59,7 +59,7 @@ export function buildContext(state) {
   if (rd?.items?.length) {
     L.push(`\n# 飆股雷達（${rd.date} 收盤資料，掃 ${rd.universe} 檔，${rd.candidates} 檔有訊號）${state.config.radar?.notes ? "；你的方法：" + state.config.radar.notes.slice(0, 300) : ""}`);
     if (rd.overview) L.push(rd.overview);
-    for (const x of rd.items.slice(0, 12)) L.push(`- ${x.symbol} ${x.name}：收 ${x.price}（${sign(x.changePct, 2)}%），5日 ${sign(x.ret5, 1)}%，量比 ${x.volRatio}x，${x.signals.join("、")}${x.pick ? `；你的判定「${x.pick.verdict}」：${x.pick.reason}` : ""}`);
+    for (const x of rd.items.slice(0, 12)) L.push(`- ${x.symbol} ${x.name}：收 ${x.price}（${sign(x.changePct, 2)}%），5日 ${sign(x.ret5, 1)}%，量比 ${x.volRatio}x${x.pe != null ? `，本益比 ${x.pe}` : ""}，${x.signals.join("、")}${x.pick ? `；你的判定「${x.pick.verdict}」：${x.pick.reason}` : ""}`);
   }
   if (!lc) { L.push(`\n# 尚未執行過分析，沒有委員會資料。`); return L.join("\n"); }
   L.push(`\n# 最近一輪分析（${lc.tTaipei}，${lc.marketOpen ? "盤中" : "盤後"}，${lc.executed ? "已模擬下單" : "僅建議"}，來源 ${lc.source}）`);

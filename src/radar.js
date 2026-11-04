@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod/v4";
 import { storage } from "./storage.js";
+import { getValuation } from "./twse.js";
 
 const UA = { "User-Agent": "Mozilla/5.0" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -180,5 +181,7 @@ export async function runRadar(cfg = {}, { model = "claude-opus-5-5", effort = "
   const items = top.slice(0, cfg.topN).map((c) => ({ ...c, pick: byPick[c.symbol] || null }));
   // 投資長挑到但不在前 topN 的也補進來
   for (const p of ai?.picks || []) if (!items.find((x) => x.symbol === p.symbol)) { const c = all.find((x) => x.symbol === p.symbol); if (c) items.push({ ...c, pick: p }); }
+  // 估值（本益比、淨值比、殖利率）：證交所／櫃買每日表，一次拿整個市場
+  try { const v = await getValuation(items.map((x) => x.symbol)); for (const x of items) if (v[x.symbol]) { x.pe = v[x.symbol].pe; x.pb = v[x.symbol].pb; x.yield = v[x.symbol].yield; } } catch (e) { console.warn("[radar] valuation", e.message); }
   return { t: new Date().toISOString(), date: days[days.length - 1].date, universe: Object.keys(days[days.length - 1].rows).length, candidates: all.length, items, overview: ai?.overview || null, ai: ai ? { model: ai.model, usage: ai.usage, error: ai.error, picks: (ai.picks || []).length } : null, cfg, durationMs: Date.now() - t0 };
 }
