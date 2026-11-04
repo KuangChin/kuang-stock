@@ -57,6 +57,9 @@ node src/cli.js backtest 2330,2317,2454 1000000 120
 
 - 字幕：`pip install --user yt-dlp`。雲端（Vercel）抓不到字幕，只看標題與說明；在本機跑
   `npm run advisors-push`（.env 需有 `APP_URL`、`CRON_SECRET`）會把字幕推到雲端，之後雲端分析就有完整內容。
+  建議放進 crontab，一天三次（台北 07:40、12:30、18:30）：
+  `40 7,12 * * 1-5 cd /home/guerrilla/kuang-stock && npm run advisors-push >> data/advisors-push.log 2>&1`
+  （GitHub Actions 的機器被 YouTube 擋，連 RSS 都 404，所以不能用它代跑。）
 - 股癌是純音訊、說明欄多為業配，目前只有標題，要有內容需接語音轉文字服務。
 - 個股沒被點名時，投顧分數只帶入大盤看法的一半、信心 0.25；完全沒資料則跳過不加權。
 

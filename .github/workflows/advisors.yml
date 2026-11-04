@@ -1,16 +1,10 @@
 # 抓投顧 YouTube 自動字幕並推到雲端（Vercel 本身抓不到字幕）。
-# 台北 07:40（游庭皓早上那集通常 09:00 前上）與 12:30、18:30 各跑一次；也可手動 Run workflow。
+# 實測 2026-11-04：YouTube 對 GitHub 的機器連 RSS 都回 404，所以這支只保留手動觸發備用；
+# 正式的字幕推送在本機排程跑 npm run advisors-push（見 README）。
 # 需要 repo secrets：APP_URL、CRON_SECRET（與 auto-cycle 相同）。
-# 若 YouTube 擋 GitHub 的 IP（429 或要求登入），改在本機跑 npm run advisors-push。
 name: advisors-transcripts
 on:
-  schedule:
-    - cron: "40 23 * * 0-4"
-    - cron: "30 4 * * 1-5"
-    - cron: "30 10 * * 1-5"
   workflow_dispatch:
-  push:
-    paths: [".github/workflows/advisors.yml", "scripts/advisors-push.mjs", "src/advisors.js"]
 jobs:
   push:
     runs-on: ubuntu-latest
