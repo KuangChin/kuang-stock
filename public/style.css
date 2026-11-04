@@ -125,6 +125,7 @@ table.compact td { padding: 4px 6px; font-size: 12.5px; } table.compact tr.sub-n
 .msg ul { margin: 4px 0; padding-left: 18px; } .msg li { margin: 2px 0; }
 .msg .meta { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; white-space: normal; }
 .msg.user .meta { color: rgba(255,255,255,.75); }
+.msg.progress { background: none; border: 0; padding: 0 4px; font-size: 12px; color: var(--muted); align-self: flex-start; }
 @keyframes blink { to { opacity: 0; } }
 .chat-form { display: flex; gap: 8px; align-items: flex-end; border-top: 1px solid var(--border); padding-top: 10px; }
 .chat-form textarea { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--axis); border-radius: 8px; background: var(--surface); color: var(--ink); resize: none; }

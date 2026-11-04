@@ -26,7 +26,8 @@ const SYSTEM = `你是「投資長」，主持一個台股模擬交易帳戶的�
    改完用幾句話回報改了什麼、現在的值是多少。回測結果要講報酬、最大回撤、交易次數、與 0050 同期比較，並給一句評語。追蹤清單的股票會在下一輪分析納入。
 4. 回答長度看問題：閒聊或簡單問題兩三句就好；分析類問題用短段落或條列，不要超過 300 字，除非對方要求詳細。
 5. 可以表達不同意委員會先前的結論，但要說明新理由。
-6. 停損、停利等風控數字一律以背景資料「風控」那一行為準（那是帳戶主人自己設的），不要引用其他比例；「保留現金」是現金比例，不是停損。`;
+6. 停損、停利等風控數字一律以背景資料「風控」那一行為準（那是帳戶主人自己設的），不要引用其他比例；「保留現金」是現金比例，不是停損。
+7. 全程用繁體中文，包括呼叫工具前的過場句；不要出現英文句子。要連續跑好幾個工具時，先用一句中文說接下來要做什麼，最後一定要用中文把結果整理成結論。`;
 
 /** 把最近一輪分析整理成給投資長看的背景（文字；同一輪內不變，利於快取） */
 export function buildContext(state) {
@@ -216,18 +217,23 @@ export async function* chatStream({ state, history, model = "claude-opus-5-5", e
   ];
   let text = "", final = null;
   const changed = new Set();
-  for (let round = 0; round < 6; round++) {
-    const stream = client.messages.stream({ model, max_tokens: 8000, system, tools: TOOLS, messages, output_config: { effort } });
+  const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
+  // 最多 MAX_ROUNDS 回合工具；用完時再叫一次「不准用工具」，逼他把結果整理成中文結論，不然對話會停在過場句
+  for (let round = 0; round <= MAX_ROUNDS; round++) {
+    const exhausted = round === MAX_ROUNDS;
+    const stream = client.messages.stream({ model, max_tokens: 8000, system, tools: TOOLS, messages, output_config: { effort }, ...(exhausted ? { tool_choice: { type: "none" } } : {}) });
     for await (const ev of stream) {
       if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") { text += ev.delta.text; yield ev.delta.text; }
     }
     final = await stream.finalMessage();
+    for (const k of Object.keys(usage)) usage[k] += final.usage?.[k] || 0;
     if (final.stop_reason === "refusal") throw new Error("模型拒絕回答：" + (final.stop_details?.explanation || ""));
     if (final.stop_reason !== "tool_use") break;
     const uses = final.content.filter((b) => b.type === "tool_use");
     messages.push({ role: "assistant", content: final.content });
     const results = [];
     for (const u of uses) {
+      yield { progress: progressLabel(u.name, u.input) };
       let out;
       try { out = (await runSettingTool(u.name, u.input, state, changed)) ?? (await runTool(u.name, u.input, state, changed)); } catch (e) { out = { error: e.message }; }
       results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(out) });
@@ -235,5 +241,18 @@ export async function* chatStream({ state, history, model = "claude-opus-5-5", e
     messages.push({ role: "user", content: results });
     if (text && !text.endsWith("\n")) { text += "\n\n"; yield "\n\n"; }
   }
-  return { usage: final.usage, stop_reason: final.stop_reason, text, model: final.model, changed: [...changed] };
+  return { usage, stop_reason: final.stop_reason, text, model: final.model, changed: [...changed] };
+}
+
+const MAX_ROUNDS = 10;
+/** 工具執行中顯示在對話框的中文進度 */
+function progressLabel(name, input = {}) {
+  const span = input.from ? `${input.from}～${input.to || "今天"}` : `${input.days || 240} 天`;
+  if (name === "run_backtest") return `回測 ${input.symbols?.length ? input.symbols.length + " 檔" : "追蹤清單"} ${span}…`;
+  if (name === "get_history") return `查 ${(input.series || []).join("、")} 走勢 ${span}…`;
+  if (name === "set_risk") return "修改風控參數…";
+  if (name === "set_weights") return "調整分析師權重…";
+  if (name === "search_stock") return `查 ${input.query || ""}…`;
+  if (name === "get_settings") return "讀取目前設定…";
+  return "更新追蹤清單…";
 }

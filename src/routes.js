@@ -145,6 +145,7 @@ export const routes = {
         for (;;) {
           const r = await gen.next();
           if (r.done) { meta = r.value; break; }
+          if (typeof r.value !== "string") { yield r.value; continue; } // 工具進度
           text += r.value; yield { delta: r.value };
         }
         s.chat.push({ role: "assistant", content: text, t: new Date().toISOString(), model: meta?.model, usage: meta?.usage && { in: meta.usage.input_tokens, out: meta.usage.output_tokens, cached: meta.usage.cache_read_input_tokens } });

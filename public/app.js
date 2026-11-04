@@ -272,6 +272,7 @@ $("#chatForm").onsubmit = async (e) => {
   chatBusy = true; $("#chatSend").disabled = true; chatInput.value = "";
   chatBubble("user", text, timeStr(new Date().toISOString()));
   const bubble = chatBubble("assistant", ""); bubble.classList.add("typing");
+  const prog = document.createElement("div"); prog.className = "msg progress hidden"; bubble.after(prog);
   let acc = "";
   try {
     const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
@@ -286,12 +287,13 @@ $("#chatForm").onsubmit = async (e) => {
         if (!line.startsWith("data:")) continue;
         const ev = JSON.parse(line.slice(5));
         if (ev.delta) { acc += ev.delta; bubble.innerHTML = md(acc); chatLog.scrollTop = chatLog.scrollHeight; }
+        else if (ev.progress) { prog.textContent = "⏳ " + ev.progress; prog.classList.remove("hidden"); chatLog.scrollTop = chatLog.scrollHeight; }
         else if (ev.error) throw new Error(ev.error);
         else if (ev.done) { bubble.innerHTML = md(acc); const m = document.createElement("span"); m.className = "meta"; m.textContent = chatMeta({ t: new Date().toISOString(), usage: ev.usage && { in: ev.usage.input_tokens, out: ev.usage.output_tokens, cached: ev.usage.cache_read_input_tokens } }); bubble.appendChild(m); if (ev.refresh) refresh().catch(() => {}); }
       }
     }
     if (!acc) throw new Error("沒有收到回覆");
   } catch (err) { bubble.textContent = "（失敗：" + err.message + "）"; }
-  finally { bubble.classList.remove("typing"); chatBusy = false; $("#chatSend").disabled = false; chatLog.scrollTop = chatLog.scrollHeight; }
+  finally { prog.remove(); bubble.classList.remove("typing"); chatBusy = false; $("#chatSend").disabled = false; chatLog.scrollTop = chatLog.scrollHeight; }
 };
 if (location.hash === "#chat") openChat();
