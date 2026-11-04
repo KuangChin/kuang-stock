@@ -27,8 +27,9 @@ function setBusy(b) { busy = b; $$("#btnAnalyze,#btnRun").forEach((x) => (x.disa
 function tile(label, value, delta = "", c = "") { return `<div class="tile"><div class="label">${label}</div><div class="value ${c}">${value}</div><div class="delta ${c}">${delta}</div></div>`; }
 
 function render() {
+  if (!S) return;
   const sw = $("#storageWarn");
-  if (S.runtime?.backend === "memory") { sw.textContent = "尚未連接 Redis：資料不會保存"; sw.classList.remove("hidden"); } else sw.classList.add("hidden");
+  if (S?.runtime?.backend === "memory") { sw.textContent = "尚未連接 Redis：資料不會保存"; sw.classList.remove("hidden"); } else sw.classList.add("hidden");
   const lc = S.lastCycle, v = lc?.valuation;
   $("#clock").textContent = S.now;
   const mb = $("#marketBadge"); mb.textContent = S.marketOpen ? "盤中" : "盤後"; mb.className = "badge " + (S.marketOpen ? "open" : "");

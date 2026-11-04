@@ -139,7 +139,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
       }
     }
     const val2 = valuation(state, quotes);
-    const summary = buildSummary({ analyses, macro, decisions: finalDecisions, ai, valuation: val2, risk: state.config.risk, marketOpen });
+    const summary = buildSummary({ analyses, macro, decisions: finalDecisions, ai, valuation: val2, risk: state.config.risk, marketOpen, advisors });
     state.equity.push({ t: new Date().toISOString(), total: val2.total, cash: val2.cash, marketValue: val2.marketValue });
     if (state.equity.length > 5000) state.equity.splice(0, state.equity.length - 5000);
     state.lastCycle = {
