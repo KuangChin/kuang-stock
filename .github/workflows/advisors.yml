@@ -9,6 +9,8 @@ on:
     - cron: "30 4 * * 1-5"
     - cron: "30 10 * * 1-5"
   workflow_dispatch:
+  push:
+    paths: [".github/workflows/advisors.yml", "scripts/advisors-push.mjs", "src/advisors.js"]
 jobs:
   push:
     runs-on: ubuntu-latest
