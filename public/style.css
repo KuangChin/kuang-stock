@@ -152,7 +152,7 @@ table.compact td { padding: 4px 6px; font-size: 12.5px; } table.compact tr.sub-n
   /* 訊號表：隱藏五位分析師分數欄（點進明細看）與理由欄，理由改顯示在下一列 */
   #decTable th:nth-child(n+6):nth-child(-n+11), #decTable tr:not(.sub) > td:nth-child(n+6):nth-child(-n+11),
   #decTable th:nth-child(n+12):nth-child(-n+14), #decTable tr:not(.sub) > td:nth-child(n+12):nth-child(-n+14) { display: none; }
-  #posTable th:nth-child(10), #posTable td:nth-child(10),
+  #posTable th:nth-child(6), #posTable td:nth-child(6), #posTable th:nth-child(11), #posTable td:nth-child(11),
   #radarTable th:nth-child(n+5):nth-child(-n+8), #radarTable tr:not(.sub) > td:nth-child(n+5):nth-child(-n+8),
   #tradeTable th:nth-child(7), #tradeTable tr:not(.sub) > td:nth-child(7), #tradeTable th:nth-child(9), #tradeTable tr:not(.sub) > td:nth-child(9),
   #tradeTable th:nth-child(10), #tradeTable tr:not(.sub) > td:nth-child(10) { display: none; }
