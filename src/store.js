@@ -27,7 +27,15 @@ export function defaultState() {
   };
 }
 
-let state = null;
+// 狀態物件：
+// - 本機（單一程序）：載入一次放在 moduleState，所有請求與排程共用。
+// - 雲端（每個請求都從 Redis 重讀）：每個請求有自己的一份，放在 AsyncLocalStorage 裡。
+//   以前用單一 module 變數，頁面每分鐘輪詢 /api/state 時會把「正在分析中」的那份整個換掉，
+//   分析完存檔時拿到的是輪詢載入的舊物件，結果永遠寫不進去。
+import { AsyncLocalStorage } from "node:async_hooks";
+const als = new AsyncLocalStorage();
+let moduleState = null;
+const current = () => als.getStore()?.state ?? moduleState;
 
 export function mergeDefaults(loaded) {
   const d = defaultState();
@@ -37,57 +45,67 @@ export function mergeDefaults(loaded) {
 }
 
 /**
- * 載入狀態。本機（單一程序）載入一次後留在記憶體；
- * Redis 模式每個請求都要 fresh 重讀，因為排程與頁面可能在不同的 function 實例上寫入。
+ * 載入狀態。fresh=false：有就直接用（本機）。fresh=true：從儲存層重讀一份新的，
+ * 不會動到其他請求正在用的物件；呼叫端要用 runWithState() 把它綁到這個請求。
  */
 export async function loadState({ fresh = false } = {}) {
-  if (state && !fresh) return state;
+  if (!fresh && current()) return current();
   const loaded = await storage.get(KEY);
-  if (loaded) state = mergeDefaults(loaded);
-  else { state = defaultState(); await saveState(); }
-  return state;
+  let st;
+  if (loaded) st = mergeDefaults(loaded);
+  else { st = defaultState(); await storage.set(KEY, st); }
+  if (!moduleState) moduleState = st;
+  return st;
 }
+/** 在 fn 執行期間（含其中所有 await / 背景 promise）getState() 都回傳 st */
+export function runWithState(st, fn) { return als.run({ state: st }, fn); }
+/** 在目前的非同步流程中切換到 st（給 async generator 用：它的本體是在 handleApi 回傳後才執行） */
+export function enterState(st) { als.enterWith({ state: st }); }
 
 /**
  * 儲存。fields 給了就只寫這些欄位：先讀回儲存層的最新版，覆蓋指定欄位再存回，
  * 避免雲端上同時進行的請求（例如對話與分析）互相把對方的結果蓋掉。
  * 本機檔案模式是單一程序，直接整份寫。
  */
-export async function saveState(fields = null) {
-  if (!fields || storage.name === "file") { await storage.set(KEY, state); return; }
+export async function saveState(fields = null, st = current()) {
+  if (!st) return;
+  if (!fields || storage.name === "file") { await storage.set(KEY, st); return; }
   const cur = await storage.get(KEY);
-  if (!cur) { await storage.set(KEY, state); return; }
-  for (const f of fields) cur[f] = state[f];
-  // 其他欄位以儲存層為準，同步回記憶體，讓這個請求後續讀到的也是最新的
-  for (const k of Object.keys(cur)) if (!fields.includes(k)) state[k] = cur[k];
+  if (!cur) { await storage.set(KEY, st); return; }
+  for (const f of fields) cur[f] = st[f];
+  for (const k of Object.keys(cur)) if (!fields.includes(k)) st[k] = cur[k];
   await storage.set(KEY, cur);
 }
 
 export function getState() {
-  return state;
+  return current();
 }
 
 export async function resetState(partial = {}) {
+  const st = current();
   const d = defaultState();
-  const keepConfig = state?.config || d.config;
-  state = { ...d, config: { ...keepConfig, ...(partial.config || {}) } };
-  if (partial.cash != null) { state.cash = partial.cash; state.config.initialCash = partial.cash; }
+  const keepConfig = st?.config || d.config;
+  const next = { ...d, config: { ...keepConfig, ...(partial.config || {}) } };
+  if (partial.cash != null) { next.cash = partial.cash; next.config.initialCash = partial.cash; }
   let costBasis = 0;
   if (partial.positions) {
     for (const p of partial.positions) {
       if (!p.symbol || !p.shares) continue;
-      state.positions[String(p.symbol)] = { shares: Number(p.shares), avgCost: Number(p.avgCost || 0), name: p.name || "" };
+      next.positions[String(p.symbol)] = { shares: Number(p.shares), avgCost: Number(p.avgCost || 0), name: p.name || "" };
       costBasis += Number(p.shares) * Number(p.avgCost || 0);
     }
   }
   // 報酬基準 = 起始現金 + 原始持股成本
-  state.initialEquity = state.cash + costBasis;
+  next.initialEquity = next.cash + costBasis;
+  // 就地覆蓋，讓這個請求（與本機的排程）手上的參考都看到新內容
+  if (st) { for (const k of Object.keys(st)) delete st[k]; Object.assign(st, next); } else moduleState = next;
   await saveState();
-  return state;
+  return current();
 }
 
 export function addLog(msg, level = "info") {
-  if (!state) return;
-  state.log.unshift({ t: new Date().toISOString(), level, msg });
-  if (state.log.length > 300) state.log.length = 300;
+  const st = current();
+  if (!st) return;
+  st.log.unshift({ t: new Date().toISOString(), level, msg });
+  if (st.log.length > 300) st.log.length = 300;
 }

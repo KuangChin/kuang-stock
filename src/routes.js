@@ -1,6 +1,6 @@
 // 共用路由表：本機 http 伺服器與 Vercel function 都用同一份。
 // handleApi() 負責登入驗證、排程驗證、狀態載入與錯誤處理，回傳 { status, headers, body }。
-import { loadState, getState, saveState, resetState, addLog } from "./store.js";
+import { loadState, getState, saveState, resetState, addLog, runWithState, enterState } from "./store.js";
 import { runCycle, symbolDetail, autoTick } from "./engine.js";
 import { runBacktest } from "./backtest.js";
 import { tuneRisk } from "./tuner.js";
@@ -127,6 +127,7 @@ export const routes = {
     const effort = s.config.chat?.effort || "low";
     const gen = chatStream({ state: s, history, model, effort });
     async function* events() {
+      enterState(s); // generator 本體在 handleApi 回傳後才執行，要重新綁定這個請求的狀態
       let text = "", meta = null;
       try {
         for (;;) {
@@ -185,9 +186,10 @@ export async function handleApi(req) {
   if (!cron && !open && !(await verifySession(cookies[COOKIE]))) return { status: 401, headers: {}, body: { error: "unauthorized", login: "/login.html" } };
   const headers = { "Cache-Control": "no-store" };
   const ctx = { cron, secure: req.secure ?? true, setHeader: (k, v) => { headers[k] = v; } };
+  // Redis 模式每次請求重新讀一份，並綁在這個請求上（runWithState），不會被其他同時進行的請求換掉
+  const st = await loadState({ fresh: storage.name === "redis" });
+  return runWithState(st, async () => {
   try {
-    // Redis 模式每次請求重新讀取，確保看到排程寫入的最新狀態
-    await loadState({ fresh: storage.name === "redis" });
     const body = await handler(req.url, req.body || {}, ctx);
     if (body && body.__stream) return { status: 200, headers: { ...headers, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" }, stream: body.__stream };
     return { status: 200, headers, body };
@@ -200,4 +202,5 @@ export async function handleApi(req) {
     }
     return { status, headers, body: { error: e.message } };
   }
+  });
 }
