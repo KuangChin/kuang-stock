@@ -4,7 +4,7 @@ import { loadEnv } from "./env.js";
 import { valuation } from "./portfolio.js";
 import { taipeiNow, isMarketOpen, searchStocks } from "./twse.js";
 import { addLog } from "./store.js";
-import { runBacktest } from "./backtest.js";
+import { runBacktest, normalizeRange } from "./backtest.js";
 import { isServerless } from "./storage.js";
 import { DEFAULT_WEIGHTS, LABELS } from "./analysts/index.js";
 import { getTaifex } from "./taifex.js";
@@ -105,7 +105,7 @@ const TOOLS = [
   { name: "get_settings", description: "讀目前的風控參數、分析師權重、追蹤清單、自動執行與 AI 設定。", input_schema: { type: "object", properties: {} } },
   { name: "set_risk", description: "修改風控參數，只需給要改的欄位。百分比欄位用 0～100 的數字（停損 30 代表 30%；單一持股不設限給 maxPositionPct 100）。lockStopLoss=true 表示停損固定，自動調參不得更動。", input_schema: { type: "object", properties: { stopLossPct: { type: "number" }, takeProfitPct: { type: "number" }, maxPositionPct: { type: "number" }, perTradePct: { type: "number" }, minCashPct: { type: "number" }, buyThreshold: { type: "number", description: "綜合分數 -8～+8，達此值買進" }, sellThreshold: { type: "number" }, maxPositions: { type: "integer" }, cooldownDays: { type: "integer" }, lockStopLoss: { type: "boolean" } } } },
   { name: "set_weights", description: "調整六位分析師的權重（technical 技術、fundamental 基本面、chips 籌碼、macro 總經、sentiment 情緒、advisor 投顧），用 0～100 的數字，只需給要改的；系統會自動把總和正規化成 100%。", input_schema: { type: "object", properties: { technical: { type: "number" }, fundamental: { type: "number" }, chips: { type: "number" }, macro: { type: "number" }, sentiment: { type: "number" }, advisor: { type: "number" } } } },
-  { name: "run_backtest", description: "用目前風控參數回測（只用技術線型分析師，沒有籌碼與新聞的歷史）。days 預設 240 個交易日；symbols 不給就用追蹤清單＋持股。要花 30～120 秒。", input_schema: { type: "object", properties: { days: { type: "integer" }, symbols: { type: "array", items: { type: "string" } } } } },
+  { name: "run_backtest", description: "用目前風控參數回測（只用技術線型分析師，沒有籌碼與新聞的歷史）。時間段兩種給法：days（最近 N 個交易日，預設 240）或 from/to（YYYY-MM-DD，指定起迄日期，例如「跑 2025 上半年」就是 from 2025-01-01、to 2025-06-30；只給 from 就跑到今天）。symbols 不給就用追蹤清單＋持股。要花 30～120 秒。", input_schema: { type: "object", properties: { days: { type: "integer" }, from: { type: "string", description: "起日 YYYY-MM-DD" }, to: { type: "string", description: "迄日 YYYY-MM-DD" }, symbols: { type: "array", items: { type: "string" } } } } },
 ];
 const PCT_FIELDS = ["stopLossPct", "takeProfitPct", "maxPositionPct", "perTradePct", "minCashPct"];
 const CLOUD_BT = { symbols: 10, days: 250 };
@@ -171,11 +171,14 @@ async function runSettingTool(name, input, state, changed) {
     let symbols = (input?.symbols || []).map(String).filter((x) => /^\d{4,6}$/.test(x));
     if (!symbols.length) symbols = [...new Set([...Object.keys(state.positions), ...c.watchlist])];
     let days = Math.max(30, Number(input?.days) || 240);
+    const { from, to } = normalizeRange(input || {});
     if (isServerless) { symbols = symbols.slice(0, CLOUD_BT.symbols); days = Math.min(days, CLOUD_BT.days); }
     const months = Math.ceil((days + 65) / 21) + 1; // 回測需要 65 天暖機
-    const r = await runBacktest({ symbols, cash: state.initialEquity || c.initialCash, days, risk: c.risk, fees: c.fees, months });
-    addLog(`投資長回測 ${symbols.length} 檔 ${days} 天：報酬 ${r.returnPct}%，回撤 ${r.maxDrawdownPct}%，0050 ${r.benchmarkReturnPct}%`); changed.add("log");
-    return { symbols: r.symbols, days: r.days, start: r.start, end: r.end, returnPct: r.returnPct, benchmarkReturnPct: r.benchmarkReturnPct, maxDrawdownPct: r.maxDrawdownPct, trades: r.trades, sells: r.sells, winRate: r.winRate, realized: r.realized, finalEquity: r.finalEquity, note: "只用技術線型分析師回測；籌碼、新聞、投顧沒有歷史快照" };
+    const r = await runBacktest({ symbols, cash: state.initialEquity || c.initialCash, days, from, to, maxDays: isServerless ? CLOUD_BT.days : null, risk: c.risk, fees: c.fees, months });
+    if (r.error) return { error: r.error, from, to };
+    const span = from ? `${r.start}～${r.end}` : `${days} 天`;
+    addLog(`投資長回測 ${symbols.length} 檔 ${span}：報酬 ${r.returnPct}%，回撤 ${r.maxDrawdownPct}%，0050 ${r.benchmarkReturnPct}%`); changed.add("log");
+    return { symbols: r.symbols, days: r.days, start: r.start, end: r.end, returnPct: r.returnPct, benchmarkReturnPct: r.benchmarkReturnPct, maxDrawdownPct: r.maxDrawdownPct, trades: r.trades, sells: r.sells, winRate: r.winRate, realized: r.realized, finalEquity: r.finalEquity, note: (r.truncated ? `雲端最多 ${CLOUD_BT.days} 個交易日，實際從 ${r.start} 起算。` : "") + "只用技術線型分析師回測；籌碼、新聞、投顧沒有歷史快照" };
   }
   return null;
 }

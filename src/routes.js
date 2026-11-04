@@ -2,7 +2,7 @@
 // handleApi() 負責登入驗證、排程驗證、狀態載入與錯誤處理，回傳 { status, headers, body }。
 import { loadState, getState, saveState, resetState, addLog, runWithState, enterState } from "./store.js";
 import { runCycle, symbolDetail, autoTick } from "./engine.js";
-import { runBacktest } from "./backtest.js";
+import { runBacktest, normalizeRange } from "./backtest.js";
 import { tuneRisk } from "./tuner.js";
 import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow } from "./twse.js";
 import { executeOrder, valuation } from "./portfolio.js";
@@ -99,10 +99,13 @@ export const routes = {
   },
   // 排程密鑰可讀最近的系統日誌（排錯用）
   "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
+  // 時間段兩種給法：days（最近 N 個交易日）或 from/to（YYYY-MM-DD）
   "POST /api/backtest": async (u, body) => {
+    const { from, to } = normalizeRange(body);
+    body = { ...body, from, to };
     if (isServerless) {
       const days = Math.min(Number(body.days) || 120, CLOUD_LIMITS.backtestDays);
-      body = { ...body, symbols: (body.symbols || []).slice(0, CLOUD_LIMITS.backtestSymbols), days, months: Math.ceil((days + 65) / 21) + 1 };
+      body = { ...body, symbols: (body.symbols || []).slice(0, CLOUD_LIMITS.backtestSymbols), days, maxDays: CLOUD_LIMITS.backtestDays, months: Math.ceil((days + 65) / 21) + 1 };
     }
     return runBacktest(body);
   },

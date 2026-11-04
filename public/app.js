@@ -205,10 +205,12 @@ $("#setupForm").onsubmit = async (e) => { e.preventDefault(); try { await saveSe
 $("#btForm").onsubmit = async (e) => {
   e.preventDefault(); const f = e.target; const btn = f.querySelector("button"); btn.disabled = true; toast("回測中（首次需下載歷史資料，約需 10-60 秒）…", 10000);
   try {
-    const r = await api("/api/backtest", { symbols: f.symbols.value.split(/[,，\s]+/).filter(Boolean), cash: Number(f.cash.value), days: Number(f.days.value), risk: S.config.risk, fees: S.config.fees });
+    const r = await api("/api/backtest", { symbols: f.symbols.value.split(/[,，\s]+/).filter(Boolean), cash: Number(f.cash.value), days: Number(f.days.value), from: f.from.value || null, to: f.to.value || null, risk: S.config.risk, fees: S.config.fees });
+    if (r.error) throw new Error(r.error);
     $("#btChart").classList.remove("hidden"); $("#btTrades").classList.remove("hidden");
+    if (r.truncated) toast(`雲端最多 250 個交易日，實際從 ${r.start} 起算`, 6000);
     $("#btStats").innerHTML = tile("期末資產", fmt(r.finalEquity), `${r.start} ～ ${r.end}`) + tile("策略報酬", sign(r.returnPct, 2, "%"), "", cls(r.returnPct)) + tile(`${r.benchmark} 同期`, sign(r.benchmarkReturnPct, 2, "%"), "買進持有", cls(r.benchmarkReturnPct)) + tile("最大回撤", "-" + fmt(r.maxDrawdownPct, 2) + "%", "", "down") + tile("交易次數", r.trades, `賣出 ${r.sells} 筆，勝率 ${fmt(r.winRate, 1)}%`) + tile("已實現", sign(r.realized), "", cls(r.realized));
-    Chart.line($("#btChart"), { x: r.curve.map((p) => p.date.slice(5)), series: [{ name: "策略", values: r.curve.map((p) => p.total), color: CSS("--s1") }, { name: r.benchmark + " 買進持有", values: r.curve.map((p) => p.benchmark), color: CSS("--muted"), width: 1.5, dashed: true }], baseline: r.initialCash });
+    Chart.line($("#btChart"), { x: r.curve.map((p) => p.date.slice(r.start?.slice(0, 4) === r.end?.slice(0, 4) ? 5 : 2)), series: [{ name: "策略", values: r.curve.map((p) => p.total), color: CSS("--s1") }, { name: r.benchmark + " 買進持有", values: r.curve.map((p) => p.benchmark), color: CSS("--muted"), width: 1.5, dashed: true }], baseline: r.initialCash });
     $("#btTrades tbody").innerHTML = r.tradeLog.slice(0, 80).map((t) => `<tr><td>${t.t}</td><td>${t.symbol}</td><td>${pill(t.side)}</td><td class="num">${fmt(t.shares)}</td><td class="num">${fmt(t.price, 2)}</td><td class="num ${cls(t.realized)}">${t.side === "SELL" ? sign(t.realized) : ""}</td><td class="wrap">${esc(t.reason)}</td></tr>`).join("") || '<tr><td colspan="7" class="muted">期間內沒有交易</td></tr>';
     toast("回測完成");
   } catch (err) { toast("回測失敗：" + err.message, 6000); }

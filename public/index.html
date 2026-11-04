@@ -65,7 +65,8 @@
         <form id="btForm" class="inline-form">
           <label>標的 <input name="symbols" value="2330,2317,2454,0050" size="28"></label>
           <label>起始現金 <input name="cash" type="number" value="1000000" step="10000"></label>
-          <label>天數 <input name="days" type="number" value="120" min="20" max="240"></label>
+          <label>天數 <input name="days" type="number" value="120" min="20" max="250"></label>
+          <label>或時間段 <input name="from" type="date"> ～ <input name="to" type="date"></label>
           <button class="btn" type="submit">執行回測</button>
         </form>
         <div id="btStats" class="kpi-row small"></div>

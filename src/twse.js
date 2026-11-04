@@ -169,19 +169,22 @@ async function fetchMonthOtc(symbol, ym) {
 }
 
 /**
- * 取得最近 months 個月的日線（舊 -> 新），自動快取。
+ * 取得日線（舊 -> 新），自動快取。預設最近 months 個月；給 from/to（YYYY-MM-DD）就抓那個時間段。
  * 當月資料快取 30 分鐘，過去月份永久快取。
  */
-export async function getDailyHistory(symbol, { months = 7 } = {}) {
+export async function getDailyHistory(symbol, { months = 7, from = null, to = null } = {}) {
   const listing = await getListing();
   const market = listing[symbol]?.market || "tse";
   const now = new Date();
+  const nowYm = monthKey(now);
+  // 月份清單：有 from 就從 from 的月份起算（到 to 或今天）；否則最近 months 個月
+  const end = to ? new Date(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1, 1) : new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = from ? new Date(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, 1) : new Date(end.getFullYear(), end.getMonth() - (months - 1), 1);
   const bars = [];
-  for (let k = months - 1; k >= 0; k--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+  for (let d = new Date(start); d <= end && d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
     const ym = monthKey(d);
     const key = `hist_${market}_${symbol}_${ym}`;
-    const isCurrent = k === 0;
+    const isCurrent = ym === nowYm;
     let rows = await readCache(key, isCurrent ? 30 * 60 * 1000 : null);
     if (!rows) {
       try {
@@ -195,7 +198,7 @@ export async function getDailyHistory(symbol, { months = 7 } = {}) {
     }
     bars.push(...rows);
   }
-  return bars.filter((b) => b.close != null).sort((a, b) => (a.date < b.date ? -1 : 1));
+  return bars.filter((b) => b.close != null && (!from || b.date >= from) && (!to || b.date <= to)).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
 /** 判斷台股是否開盤中（台北時間 週一至五 09:00-13:30） */
