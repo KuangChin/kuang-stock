@@ -47,7 +47,9 @@ function buildPrompt(snapshot) {
   const gl = Object.values(g).filter((x) => x?.price != null).map((x) => `${x.label} ${x.price}（${x.changePct > 0 ? "+" : ""}${x.changePct}%${x.session && x.session !== "futures" ? "，" + { pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤" }[x.session] : ""}${x.ret5 != null ? "，5日 " + (x.ret5 > 0 ? "+" : "") + x.ret5 + "%" : ""}）`).join("；");
   if (gl) lines.push(`國際市場：${gl}。`);
   lines.push(`\n帳戶：現金 ${snapshot.valuation.cash}，持股市值 ${snapshot.valuation.marketValue}，總資產 ${snapshot.valuation.total}，累積報酬 ${snapshot.valuation.returnPct}%。`);
-  lines.push(`風控參數：${JSON.stringify(snapshot.risk)}`);
+  const rk = snapshot.risk || {};
+  const P = (v) => (v == null ? "--" : Math.round(v * 1000) / 10);
+  lines.push(`風控參數（帳戶主人設定，請照此執行，不要自行建議或引用其他停損／停利比例）：停損 ${P(rk.stopLossPct)}%（持股虧損達此比例才強制賣出）、停利 ${P(rk.takeProfitPct)}%（獲利達此比例減半）、單一持股上限 ${P(rk.maxPositionPct)}%、每筆買進 ${P(rk.perTradePct)}%、保留現金 ${P(rk.minCashPct)}%（這是現金比例，不是停損）、買進門檻 ${rk.buyThreshold}、賣出門檻 ${rk.sellThreshold}、最多 ${rk.maxPositions} 檔、冷卻 ${rk.cooldownDays} 天。`);
   lines.push(`\n持股：`);
   for (const r of snapshot.valuation.rows) lines.push(`- ${r.symbol} ${r.name}: ${r.shares} 股，成本 ${r.avgCost}，現價 ${r.price}，損益 ${r.pnlPct}%`);
   if (snapshot.macro) lines.push(`\n總經分析師：分數 ${snapshot.macro.score}（${snapshot.macro.data?.regime}）\n` + (snapshot.macro.points || []).map((x) => "  - " + x).join("\n"));
