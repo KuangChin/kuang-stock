@@ -50,7 +50,14 @@ export const routes = {
     await storage.cacheSet("advisors:lastPush", { t: taipeiNow(), stored: n, items: (body.items || []).length, sources, videos: list.map((t) => t.videoId).slice(0, 20), report: body.report || null }).catch(() => {});
     return { ok: true, stored: n, sources };
   },
-  "GET /api/live": async () => { const [taifex, global] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]); return { t: taipeiNow(), taifex, global }; },
+  "GET /api/live": async () => {
+    const s = getState();
+    const syms = Object.keys(s.positions);
+    const [taifex, global, quotes, indices] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({})), syms.length ? getQuotes(syms).catch(() => null) : null, getIndexQuotes().catch(() => null)]);
+    // 持股用證交所即時報價重算市值與損益（不存檔，只給頁面顯示）
+    const val = quotes ? valuation(s, quotes) : null;
+    return { t: taipeiNow(), taifex, global, indices, valuation: val };
+  },
   "POST /api/config": async (u, body) => {
     const s = getState();
     const c = s.config;

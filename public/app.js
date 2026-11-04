@@ -30,7 +30,7 @@ function render() {
   if (!S) return;
   const sw = $("#storageWarn");
   if (S?.runtime?.backend === "memory") { sw.textContent = "尚未連接 Redis：資料不會保存"; sw.classList.remove("hidden"); } else sw.classList.add("hidden");
-  const lc = S.lastCycle, v = lc?.valuation;
+  const lc = S.lastCycle, v = LIVE?.valuation || lc?.valuation; // 持股市值優先用每分鐘的即時報價
   $("#clock").textContent = S.now;
   const mb = $("#marketBadge"); mb.textContent = S.marketOpen ? "盤中" : "盤後"; mb.className = "badge " + (S.marketOpen ? "open" : "");
   const ab = $("#aiBadge"); ab.textContent = S.config.ai.enabled ? (S.aiAvailable ? "AI 分析師：啟用" : "AI 已啟用但無金鑰") : "規則引擎"; ab.className = "badge " + (S.config.ai.enabled && S.aiAvailable ? "on" : "");
@@ -48,7 +48,7 @@ function render() {
   }
 
   // KPI
-  const idx = lc?.indices?.taiex;
+  const idx = LIVE?.indices?.taiex || lc?.indices?.taiex;
   $("#kpis").innerHTML = v
     ? tile("總資產", fmt(v.total), `累積報酬 ${sign(v.returnPct, 2, "%")}`, cls(v.returnPct)) + tile("現金", fmt(v.cash), `占 ${fmt((v.cash / v.total) * 100, 1)}%`) + tile("持股市值", fmt(v.marketValue), `${Object.keys(S.positions).length} 檔`) + tile("未實現損益", sign(v.unrealized), "", cls(v.unrealized)) + tile("今日損益", sign(v.dayPnl), "", cls(v.dayPnl)) + tile("已實現損益", sign(v.realized), `${S.trades.length} 筆交易`, cls(v.realized)) + (idx ? tile("加權指數", fmt(idx.price), `${sign(idx.change)} (${sign(idx.changePct, 2, "%")})`, cls(idx.change)) : "")
     : tile("總資產", fmt(S.cash), "尚未執行分析") + tile("現金", fmt(S.cash)) + tile("持股", Object.keys(S.positions).length + " 檔");
@@ -63,7 +63,7 @@ function render() {
   const dec = Object.fromEntries((lc?.decisions || []).map((d) => [d.symbol, d]));
   const rows = v?.rows || Object.entries(S.positions).map(([symbol, p]) => ({ symbol, name: p.name, shares: p.shares, avgCost: p.avgCost, price: p.lastPrice, marketValue: null, pnl: null, pnlPct: null }));
   $("#posTable tbody").innerHTML = rows.length ? rows.map((r) => `<tr class="clickable" data-sym="${r.symbol}"><td>${r.symbol}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.shares)}</td><td class="num">${fmt(r.avgCost, 2)}</td><td class="num">${fmt(r.price, 2)}</td><td class="num ${cls(r.changePct)}">${sign(r.changePct, 2, "%")}</td><td class="num">${fmt(r.marketValue)}</td><td class="num ${cls(r.pnl)}">${sign(r.pnl)}</td><td class="num ${cls(r.pnlPct)}">${sign(r.pnlPct, 2, "%")}</td><td>${dec[r.symbol] ? pill(dec[r.symbol].action) + ` <span class="muted small">${fmt(dec[r.symbol].score, 1)}</span>` : ""}</td></tr>`).join("") : '<tr><td colspan="10" class="muted">沒有持股。到「設定」輸入持股與現金。</td></tr>';
-  $("#posNote").textContent = v ? `更新 ${lc.tTaipei}` : "";
+  $("#posNote").textContent = LIVE?.valuation ? `即時報價 ${String(LIVE.t).replace(/^\S+ /, "").slice(0, 5)}，每分鐘更新` : v ? `分析快照 ${lc.tTaipei}` : "";
 
   // 決策
   const decs = lc?.decisions || [];
@@ -98,7 +98,7 @@ function renderGlobal() {
   const t = src.t ? String(src.t).replace(/^\d+\/\d+\/\d+ /, "").slice(0, 5) : "";
   $("#globalNote").textContent = src.snapshot ? (t ? `分析快照 ${t}` : "每分鐘更新，含盤前盤後") : `更新 ${t}，每分鐘自動更新`;
 }
-async function refreshLive() { try { LIVE = await api("/api/live"); } catch { LIVE = null; } if (S) renderGlobal(); }
+async function refreshLive() { try { LIVE = await api("/api/live"); } catch { LIVE = null; } if (S && !busy) render(); else if (S) renderGlobal(); }
 const ANALYST_ORDER = ["technical", "fundamental", "chips", "macro", "sentiment", "advisor"];
 const miniScores = (an) => ANALYST_ORDER.map((k) => { const b = an?.[k]; return `<td class="num mini ${cls(b?.score)}" title="${b ? esc(b.points.slice(0, 3).join("\n")) : ""}">${b ? sign(b.score, 1) : "--"}</td>`; }).join("");
 const pill = (a) => `<span class="pill ${a}">${{ BUY: "買進", SELL: "賣出", HOLD: "觀望" }[a] || a}</span>`;
