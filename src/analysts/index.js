@@ -4,8 +4,9 @@ import * as fundamental from "./fundamental.js";
 import * as chips from "./chips.js";
 import * as macro from "./macro.js";
 import * as sentiment from "./sentiment.js";
+import * as advisor from "./advisor.js";
 
-export const ANALYSTS = { technical, fundamental, chips, macro, sentiment };
+export const ANALYSTS = { technical, fundamental, chips, macro, sentiment, advisor };
 export const DEFAULT_WEIGHTS = Object.fromEntries(Object.values(ANALYSTS).map((a) => [a.id, a.defaultWeight]));
 export const LABELS = Object.fromEntries(Object.values(ANALYSTS).map((a) => [a.id, a.label]));
 
@@ -38,6 +39,7 @@ export function analyzeSymbol(ctx, macroResult, weights) {
     chips: chips.analyze(ctx),
     macro: macroResult,
     sentiment: sentiment.analyze(ctx),
+    advisor: advisor.analyze(ctx),
   };
   return combine(results, weights);
 }

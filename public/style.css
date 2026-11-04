@@ -66,6 +66,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--neut
 .news li { padding: 6px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
 .news .meta { font-size: 11px; color: var(--muted); }
 .news .sent { font-size: 11px; margin-left: 6px; }
+.news .sum { font-size: 12px; color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
 .log li { font-size: 12px; padding: 3px 0; color: var(--ink-2); font-variant-numeric: tabular-nums; } .log li.warn { color: var(--s2); } .log li.error { color: var(--crit); }
 .plain li { padding: 2px 0; font-size: 13px; }
 .prose { font-size: 13px; }
@@ -145,8 +146,8 @@ table.compact td { padding: 4px 6px; font-size: 12.5px; } table.compact tr.sub-n
   .committee .plan { font-size: 14px; }
   td.wrap { min-width: 200px; }
   /* 訊號表：隱藏五位分析師分數欄（點進明細看）與理由欄，理由改顯示在下一列 */
-  #decTable th:nth-child(n+6):nth-child(-n+10), #decTable tr:not(.sub) > td:nth-child(n+6):nth-child(-n+10),
-  #decTable th:nth-child(n+11):nth-child(-n+13), #decTable tr:not(.sub) > td:nth-child(n+11):nth-child(-n+13) { display: none; }
+  #decTable th:nth-child(n+6):nth-child(-n+11), #decTable tr:not(.sub) > td:nth-child(n+6):nth-child(-n+11),
+  #decTable th:nth-child(n+12):nth-child(-n+14), #decTable tr:not(.sub) > td:nth-child(n+12):nth-child(-n+14) { display: none; }
   #tradeTable th:nth-child(7), #tradeTable tr:not(.sub) > td:nth-child(7), #tradeTable th:nth-child(9), #tradeTable tr:not(.sub) > td:nth-child(9),
   #tradeTable th:nth-child(10), #tradeTable tr:not(.sub) > td:nth-child(10) { display: none; }
   tr.sub { display: table-row; } tr.sub td { white-space: normal; font-size: 12px; color: var(--ink-2); padding-top: 0; } .subtx { max-width: calc(100vw - 64px); line-height: 1.45; }

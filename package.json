@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "cycle": "node src/cli.js cycle",
     "backtest": "node src/cli.js backtest",
-    "migrate-state": "node scripts/migrate-state.mjs"
+    "migrate-state": "node scripts/migrate-state.mjs",
+    "advisors-push": "node scripts/advisors-push.mjs"
   },
   "engines": {
     "node": ">=20"

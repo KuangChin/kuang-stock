@@ -66,7 +66,7 @@ function render() {
 
   // 決策
   const decs = lc?.decisions || [];
-  $("#decTable tbody").innerHTML = decs.length ? decs.map((d) => { const a = lc.analyses[d.symbol] || {}; return `<tr class="clickable" data-sym="${d.symbol}"><td>${d.symbol}</td><td>${esc(a.name)}</td><td class="num">${fmt(a.price, 2)}</td><td class="num ${cls(a.changePct)}">${sign(a.changePct, 2, "%")}</td><td>${scoreBar(d.score)}</td>${miniScores(a.analysts)}<td>${pill(d.action)}${d.result ? ` <span class="muted small">${esc(d.result)}</span>` : ""}</td><td class="num">${d.shares ? fmt(d.shares) : ""}</td><td class="wrap">${esc(d.reason)}</td></tr><tr class="sub clickable" data-sym="${d.symbol}"><td colspan="13"><div class="subtx">${pill(d.action)}${d.shares ? ` <b>${fmt(d.shares)} 股</b>` : ""}${d.result ? ` <span class="muted">${esc(d.result)}</span>` : ""} ${esc(d.reason)}</div></td></tr>`; }).join("") : '<tr><td colspan="13" class="muted">按上方「分析」產生訊號。</td></tr>';
+  $("#decTable tbody").innerHTML = decs.length ? decs.map((d) => { const a = lc.analyses[d.symbol] || {}; return `<tr class="clickable" data-sym="${d.symbol}"><td>${d.symbol}</td><td>${esc(a.name)}</td><td class="num">${fmt(a.price, 2)}</td><td class="num ${cls(a.changePct)}">${sign(a.changePct, 2, "%")}</td><td>${scoreBar(d.score)}</td>${miniScores(a.analysts)}<td>${pill(d.action)}${d.result ? ` <span class="muted small">${esc(d.result)}</span>` : ""}</td><td class="num">${d.shares ? fmt(d.shares) : ""}</td><td class="wrap">${esc(d.reason)}</td></tr><tr class="sub clickable" data-sym="${d.symbol}"><td colspan="14"><div class="subtx">${pill(d.action)}${d.shares ? ` <b>${fmt(d.shares)} 股</b>` : ""}${d.result ? ` <span class="muted">${esc(d.result)}</span>` : ""} ${esc(d.reason)}</div></td></tr>`; }).join("") : '<tr><td colspan="14" class="muted">按上方「分析」產生訊號。</td></tr>';
   $("#decNote").textContent = lc ? `${lc.executed ? "已模擬下單" : "僅建議"} · ${lc.ai ? "AI：" + lc.ai.model : "規則引擎"} · 耗時 ${(lc.durationMs / 1000).toFixed(1)}s` : "";
 
   // 市場觀點
@@ -74,6 +74,10 @@ function render() {
   renderGlobal();
   $("#macroPoints").innerHTML = lc?.macro ? `<li><b>總經分析師 ${sign(lc.macro.score, 1)}</b> <span class="muted">${lc.macro.data?.regime || ""}</span></li>` + (lc.macro.points || []).map((x) => `<li>· ${esc(x)}</li>`).join("") : "";
   $("#macroNews").innerHTML = (lc?.macroNews || []).slice(0, 14).map(newsLi).join("") || '<li class="muted">--</li>';
+  const adv = lc?.advisors;
+  const stanceTxt = { bullish: "▲偏多", bearish: "▼偏空", neutral: "中性" }, stanceCls = { bullish: "up", bearish: "down", neutral: "" };
+  $("#advisorMarket").innerHTML = adv?.market ? `大盤看法 <b class="${cls(adv.market.score)}">${sign(adv.market.score, 1)}</b> <span class="muted">（${adv.transcripts} 集有字幕）</span><ul class="plain">${(adv.market.points || []).map((p) => `<li>· ${esc(p)}</li>`).join("")}</ul>` : '<span class="muted">按「分析」後會列出最近一週各頻道的看法。</span>';
+  $("#advisorList").innerHTML = (adv?.items || []).map((it) => `<li><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(it.title)}</a>${it.stance ? `<span class="sent ${stanceCls[it.stance]}">${stanceTxt[it.stance]}</span>` : ""}<div class="meta">${esc(it.sourceName)} · ${timeStr(it.published)}${it.hasTranscript ? "" : " · 僅標題"}</div>${it.summary ? `<div class="sum">${esc(it.summary)}${it.stocks?.length ? "<br>" + it.stocks.map((s) => `<span class="${stanceCls[s.stance]}">${esc(s.name)}${{ bullish: "偏多", bearish: "偏空" }[s.stance] || ""}</span>`).join("、") : ""}</div>` : ""}</li>`).join("");
 
   // 交易紀錄
   $("#tradeTable tbody").innerHTML = S.trades.length ? S.trades.slice(0, 60).map((t) => `<tr><td>${timeStr(t.t)}</td><td>${t.symbol}</td><td>${esc(t.name)}</td><td>${pill(t.side)}</td><td class="num">${fmt(t.shares)}</td><td class="num">${fmt(t.price, 2)}</td><td class="num">${fmt(t.fee + t.tax)}</td><td class="num ${cls(t.realized)}">${t.side === "SELL" ? sign(t.realized) : ""}</td><td>${t.source}</td><td class="wrap">${esc(t.reason)}</td></tr><tr class="sub"><td colspan="10"><div class="subtx">${esc(t.reason)}</div></td></tr>`).join("") : '<tr><td colspan="10" class="muted">尚無交易。</td></tr>';
@@ -94,7 +98,7 @@ function renderGlobal() {
   $("#globalNote").textContent = src.snapshot ? (t ? `分析快照 ${t}` : "每分鐘更新，含盤前盤後") : `更新 ${t}，每分鐘自動更新`;
 }
 async function refreshLive() { try { LIVE = await api("/api/live"); } catch { LIVE = null; } if (S) renderGlobal(); }
-const ANALYST_ORDER = ["technical", "fundamental", "chips", "macro", "sentiment"];
+const ANALYST_ORDER = ["technical", "fundamental", "chips", "macro", "sentiment", "advisor"];
 const miniScores = (an) => ANALYST_ORDER.map((k) => { const b = an?.[k]; return `<td class="num mini ${cls(b?.score)}" title="${b ? esc(b.points.slice(0, 3).join("\n")) : ""}">${b ? sign(b.score, 1) : "--"}</td>`; }).join("");
 const pill = (a) => `<span class="pill ${a}">${{ BUY: "買進", SELL: "賣出", HOLD: "觀望" }[a] || a}</span>`;
 function scoreBar(s) { const pct = Math.min(Math.abs(s) / 8, 1) * 50; const left = s >= 0 ? 50 : 50 - pct; return `<span class="score"><span class="bar"><i style="left:${left}%;width:${pct}%;background:${s >= 0 ? "var(--up)" : "var(--down)"}"></i></span>${sign(s, 1)}</span>`; }

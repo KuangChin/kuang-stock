@@ -65,6 +65,12 @@ export function buildContext(state) {
     for (const [id, b] of Object.entries(a.analysts || {})) if (id !== "macro") L.push(`${b.label} ${sign(b.score)}（信心 ${b.confidence}）：${(b.points || []).slice(0, 3).join("；")}`);
     if (a.news?.length) L.push(`新聞：${a.news.slice(0, 4).map((n) => n.title).join(" / ")}`);
   }
+  const adv = lc.advisors;
+  if (adv?.items?.length) {
+    L.push(`\n## 投顧觀點（最近一週；${adv.transcripts} 集有字幕）`);
+    L.push(`大盤 ${sign(adv.market?.score)}：${(adv.market?.points || []).join("；")}`);
+    for (const it of adv.items) L.push(`- ${it.sourceName} ${(it.published || "").slice(0, 10)}「${it.title}」${it.summary ? "：" + it.summary : "（只有標題）"}${it.stocks?.length ? "；提到 " + it.stocks.map((s) => `${s.symbol ? s.symbol + " " : ""}${s.name} ${{ bullish: "看多", bearish: "看空", neutral: "中性" }[s.stance]}：${s.note}`).join("、") : ""}`);
+  }
   if (lc.macroNews?.length) L.push(`\n## 總經／世界新聞\n` + lc.macroNews.slice(0, 10).map((n) => `- [${n.source}] ${n.title}`).join("\n"));
   return L.join("\n");
 }

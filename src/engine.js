@@ -2,6 +2,7 @@
 import { getQuotes, getIndexQuotes, getDailyHistory, isMarketOpen, taipeiNow, getListing, getInstitutional, getMargin, getValuation, getRevenue } from "./twse.js";
 import { getGlobalMarkets } from "./yahoo.js";
 import { getTaifex } from "./taifex.js";
+import { getAdvisorViews } from "./advisors.js";
 import { computeIndicators } from "./indicators.js";
 import { gatherNews, aggregateSentiment } from "./news.js";
 import { decide } from "./strategy.js";
@@ -39,7 +40,7 @@ export async function analyzeSymbols(symbols, { withNews = true } = {}) {
   const indices = await getIndexQuotes().catch(() => ({}));
   const names = {};
   for (const s of symbols) names[s] = quotes[s]?.name || listing[s]?.name || s;
-  const [news, global, taifex, insti, margin, valuation, revenue] = await Promise.all([
+  const [news, global, taifex, insti, margin, valuation, revenue, advisors] = await Promise.all([
     withNews ? gatherNews(names) : { bySymbol: {}, macro: [] },
     getGlobalMarkets().catch(() => ({})),
     getTaifex().catch(() => null),
@@ -47,6 +48,7 @@ export async function analyzeSymbols(symbols, { withNews = true } = {}) {
     getMargin(symbols).catch(() => ({})),
     getValuation(symbols).catch(() => ({})),
     getRevenue(symbols).catch(() => ({})),
+    getAdvisorViews(symbols, names, state.config).catch((e) => { addLog("投顧觀點取得失敗：" + e.message, "warn"); return null; }),
   ]);
   const macroSent = aggregateSentiment(news.macro);
   const macro = analyzeMarket({ indices, global, taifex, macroSentiment: macroSent.score });
@@ -57,11 +59,11 @@ export async function analyzeSymbols(symbols, { withNews = true } = {}) {
     bars = mergeToday(bars, q);
     const ind = computeIndicators(bars);
     const sent = aggregateSentiment(news.bySymbol[s] || []);
-    const ctx = { symbol: s, name: names[s], ind, quote: q, news: news.bySymbol[s] || [], sentiment: sent, macroSentiment: macroSent.score, global, insti: insti[s] || [], margin: margin[s] || null, valuation: valuation[s] || null, revenue: revenue[s] || null };
+    const ctx = { symbol: s, name: names[s], ind, quote: q, news: news.bySymbol[s] || [], sentiment: sent, macroSentiment: macroSent.score, global, insti: insti[s] || [], margin: margin[s] || null, valuation: valuation[s] || null, revenue: revenue[s] || null, advisor: advisors?.bySymbol?.[s] || null, advisorMarket: advisors?.market || null };
     const r = analyzeSymbol(ctx, macro, state.config.weights);
     analyses[s] = { symbol: s, name: names[s], quote: q, price: q?.price ?? ind?.latest?.close ?? null, changePct: q?.changePct ?? null, indicators: ind?.latest || null, series: ind?.series || null, news: news.bySymbol[s] || [], sentiment: sent, score: r.score, reasons: r.reasons, analysts: r.breakdown, valuation: valuation[s] || null, revenue: revenue[s] || null };
   }
-  return { quotes, indices, global, taifex, macro, analyses, macroNews: news.macro, macroSentiment: macroSent.score };
+  return { quotes, indices, global, taifex, macro, analyses, macroNews: news.macro, macroSentiment: macroSent.score, advisors };
 }
 
 /**
@@ -75,7 +77,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
     const symbols = [...new Set([...Object.keys(state.positions), ...state.config.watchlist])];
     const marketOpen = isMarketOpen();
     addLog(`開始分析 ${symbols.length} 檔（${marketOpen ? "盤中" : "盤後"}，來源 ${source}）`);
-    const { quotes, indices, global, taifex, macro, analyses, macroNews, macroSentiment } = await analyzeSymbols(symbols);
+    const { quotes, indices, global, taifex, macro, analyses, macroNews, macroSentiment, advisors } = await analyzeSymbols(symbols);
     const val = valuation(state, quotes);
     const lastBuyDays = {};
     for (const t of state.trades) if (t.side === "BUY" && lastBuyDays[t.symbol] == null) lastBuyDays[t.symbol] = Math.floor((Date.now() - new Date(t.t)) / 86400e3);
@@ -85,7 +87,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
     // --- AI 分析師 ---
     let ai = null, aiError = null;
     const snapshot = {
-      time: taipeiNow(), marketOpen, indices, global, taifex, macro, macroSentiment, macroNews, valuation: val, risk: state.config.risk, weights: state.config.weights,
+      time: taipeiNow(), marketOpen, indices, global, taifex, macro, macroSentiment, macroNews, advisors, valuation: val, risk: state.config.risk, weights: state.config.weights,
       analyses: Object.values(analyses).map(({ series, quote, ...rest }) => rest),
     };
     await writeSnapshot(snapshot).catch(() => {});
@@ -142,7 +144,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
     if (state.equity.length > 5000) state.equity.splice(0, state.equity.length - 5000);
     state.lastCycle = {
       t: new Date().toISOString(), tTaipei: taipeiNow(), marketOpen, executed: execute, source, durationMs: Date.now() - t0,
-      indices, global, taifex, macro, macroNews: macroNews.slice(0, 20), macroSentiment, ai: ai ? { market_view: ai.market_view, risk_level: ai.risk_level, model: ai.model, usage: ai.usage, discussion: ai.discussion || null, action_plan: ai.action_plan || null } : null, aiError, summary,
+      indices, global, taifex, macro, macroNews: macroNews.slice(0, 20), macroSentiment, advisors, ai: ai ? { market_view: ai.market_view, risk_level: ai.risk_level, model: ai.model, usage: ai.usage, discussion: ai.discussion || null, action_plan: ai.action_plan || null } : null, aiError, summary,
       decisions: finalDecisions,
       analyses: Object.fromEntries(Object.values(analyses).map((a) => [a.symbol, { symbol: a.symbol, name: a.name, price: a.price, changePct: a.changePct, quote: a.quote && { bestAsk: a.quote.bestAsk, bestBid: a.quote.bestBid, volume: a.quote.volume, time: a.quote.time, high: a.quote.high, low: a.quote.low, open: a.quote.open, prevClose: a.quote.prevClose }, indicators: a.indicators, score: a.score, reasons: a.reasons, analysts: a.analysts, sentiment: a.sentiment, news: a.news.slice(0, 8) }])),
       valuation: val2, trades: executed,
@@ -154,9 +156,9 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
 }
 
 export async function symbolDetail(symbol) {
-  const { analyses, indices, macro, global, taifex } = await analyzeSymbols([symbol]);
+  const { analyses, indices, macro, global, taifex, advisors } = await analyzeSymbols([symbol]);
   const a = analyses[symbol];
-  return { ...a, indices, macro, global, taifex };
+  return { ...a, indices, macro, global, taifex, advisors };
 }
 
 // ---------- 自動排程 ----------

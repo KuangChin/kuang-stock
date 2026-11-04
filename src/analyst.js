@@ -9,7 +9,7 @@ export { loadEnv };
 
 const Discussion = z.array(
   z.object({
-    analyst: z.enum(["technical", "fundamental", "chips", "macro", "sentiment"]),
+    analyst: z.enum(["technical", "fundamental", "chips", "macro", "sentiment", "advisor"]),
     stance_zh: z.enum(["偏多", "偏空", "中性"]),
     summary: z.string().describe("該分析師在委員會討論中的一句話結論（繁體中文，30 字內）"),
   })
@@ -17,7 +17,7 @@ const Discussion = z.array(
 const DecisionSchema = z.object({
   market_view: z.string().describe("一段 2-4 句的大盤與總經看法（繁體中文）"),
   risk_level: z.enum(["low", "medium", "high"]),
-  discussion: Discussion.describe("五位分析師各一筆"),
+  discussion: Discussion.describe("六位分析師各一筆（技術、基本面、籌碼、總經、情緒、投顧）"),
   action_plan: z.string().describe("給投資人的行動方案，1-3 句，明確說要買賣什麼或為何不動（繁體中文）"),
   decisions: z.array(
     z.object({
@@ -61,8 +61,14 @@ function buildPrompt(snapshot) {
     for (const [id, b] of Object.entries(a.analysts || {})) if (id !== "macro") lines.push(`${b.label}分析師 ${b.score}（信心 ${b.confidence}）：${(b.points || []).slice(0, 4).join("；")}`);
     if (a.news?.length) lines.push(`近期新聞：\n` + a.news.slice(0, 6).map((n) => `  - [${n.source}] ${n.title}`).join("\n"));
   }
+  const adv = snapshot.advisors;
+  if (adv) {
+    lines.push(`\n投顧觀點（${adv.items.length} 集，${adv.transcripts} 集有字幕；大盤 ${adv.market?.score > 0 ? "+" : ""}${adv.market?.score}）：`);
+    for (const p of adv.market?.points || []) lines.push(`- ${p}`);
+    for (const it of adv.items) if (it.summary) lines.push(`- ${it.sourceName} ${(it.published || "").slice(5, 10)}「${it.title.slice(0, 40)}」${{ bullish: "偏多", bearish: "偏空", neutral: "中性" }[it.stance] || ""}：${it.summary}${it.stocks?.length ? "；提到 " + it.stocks.map((s) => `${s.name}${{ bullish: "看多", bearish: "看空", neutral: "中性" }[s.stance]}`).join("、") : ""}`);
+  }
   lines.push(`\n總經/世界新聞：\n` + (snapshot.macroNews || []).slice(0, 12).map((n) => `- [${n.source}] ${n.title}`).join("\n"));
-  lines.push(`\n請以投資長角度主持委員會：先在 discussion 給五位分析師各一句話結論，再綜合給每個標的 BUY/SELL/HOLD 決策，最後在 action_plan 用 1-3 句明確告訴投資人該做什麼。這是模擬帳戶，請遵守風控參數，避免過度交易；沒有明確理由就 HOLD。`);
+  lines.push(`\n請以投資長角度主持委員會：先在 discussion 給六位分析師（含投顧）各一句話結論，再綜合給每個標的 BUY/SELL/HOLD 決策，最後在 action_plan 用 1-3 句明確告訴投資人該做什麼。這是模擬帳戶，請遵守風控參數，避免過度交易；沒有明確理由就 HOLD。`);
   return lines.join("\n");
 }
 

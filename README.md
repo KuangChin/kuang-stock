@@ -30,7 +30,7 @@ node src/cli.js cycle --execute    # 跑一輪並模擬成交
 node src/cli.js backtest 2330,2317,2454 1000000 120
 ```
 
-## 決策邏輯：五位分析師 + 投資長
+## 決策邏輯：六位分析師 + 投資長
 
 `src/analysts/` 每位分析師各自讀資料、給 -2 ～ +2 分數與信心和理由；
 投資長（`analysts/index.js`）依權重加權成 -8 ～ +8 綜合分數，再交給 `strategy.js` 依風控產生買賣。
@@ -42,10 +42,23 @@ node src/cli.js backtest 2330,2317,2454 1000000 120
 | 基本面 | 15% | 月營收年增／月增／累計、本益比、淨值比、殖利率 | 證交所／櫃買 openapi |
 | 總經 | 15% | 加權指數、費半、S&P 500、VIX、台幣匯率、美債殖利率、總經新聞 | 證交所即時指數 + Yahoo Finance |
 | 情緒 | 15% | 個股新聞情緒與熱度、市場新聞情緒、VIX、極端超買超賣反向 | Google 新聞 RSS |
+| 投顧 | 15% | 投顧老師最近一週對大盤與個股的看法（Claude 整理） | YouTube / Podcast RSS + 自動字幕 |
 
 權重可在設定調整。綜合分數 ≥ 買進門檻買進，≤ 賣出門檻賣出；另有停損、停利減碼、
 單一持股上限、保留現金、持股檔數上限、加碼冷卻期、最小下單金額等風控。
-每檔的五個分數顯示在「訊號與決策」表，點進個股可看每位分析師的理由。
+每檔的六個分數顯示在「訊號與決策」表，點進個股可看每位分析師的理由。
+
+### 投顧觀點（`src/advisors.js`）
+
+來源寫在 `DEFAULT_ADVISORS`：請支援輸贏（林睿閎 John 的頻道）、給通勤族的飆股報告書、游庭皓的財經皓角、股癌（Podcast）。
+流程：抓各來源 RSS 最近 7 天、每來源最多 4 集 → 本機有 `yt-dlp` 時抓 YouTube 自動字幕（每輪最多 3 部，YouTube 對字幕限流很兇）
+→ 交給 Claude（預設 `claude-sonnet-5-5`）整理成每集重點、提到的個股與立場、大盤分數、追蹤清單裡被點名標的的分數 → 快取 12 小時。
+結果顯示在側欄「投顧最新觀點」，也會進投資委員會與投資長對話的背景。
+
+- 字幕：`pip install --user yt-dlp`。雲端（Vercel）抓不到字幕，只看標題與說明；在本機跑
+  `npm run advisors-push`（.env 需有 `APP_URL`、`CRON_SECRET`）會把字幕推到雲端，之後雲端分析就有完整內容。
+- 股癌是純音訊、說明欄多為業配，目前只有標題，要有內容需接語音轉文字服務。
+- 個股沒被點名時，投顧分數只帶入大盤看法的一半、信心 0.25；完全沒資料則跳過不加權。
 
 回測只用技術線型分析師（籌碼、基本面、新聞沒有歷史快照）。
 
@@ -119,6 +132,7 @@ curl -s https://<app>/api/quotes?symbols=2330 --cookie "ks_session=..."   # 確�
   若被擋，換區域或改走 Vercel 以外的常駐主機。
 - 回測／自動調參在雲端限制為 4 檔、120 天、8 組；完整規模請在本機 `npm run backtest`。
 - `.claude/agents` 與 `/analyze`（Claude Code sub-agent）只在本機使用，雲端只有規則引擎與 Claude API 分析師。
+- 投顧字幕雲端抓不到，要靠本機 `npm run advisors-push` 推上去；沒推的話雲端只看標題與說明。
 - GitHub 排程可能延遲幾分鐘；repo 60 天沒 commit 排程會被 GitHub 停用，重新啟用即可。
 - Redis 模式下頁面設定與排程輪次若同時寫入，以後寫入者為準（單人使用不影響）。
 
@@ -130,6 +144,7 @@ curl -s https://<app>/api/quotes?symbols=2330 --cookie "ks_session=..."   # 確�
 - 美股指數、費半、VIX、美元指數、匯率、美債：Yahoo Finance chart API（日線）
 - S&P 500 與那斯達克期貨、台積電 ADR、NVIDIA、Apple、AMD、美光、博通：Yahoo Finance 5 分 K 含盤前盤後，快取 10 分鐘
 - 新聞：Google 新聞 RSS（繁中 / 台灣）
+- 投顧：YouTube 頻道 RSS（`youtube.com/feeds/videos.xml`）與 SoundOn Podcast RSS；字幕用 `yt-dlp`（本機）
 
 ## 檔案
 
@@ -137,7 +152,9 @@ curl -s https://<app>/api/quotes?symbols=2330 --cookie "ks_session=..."   # 確�
 src/twse.js        證交所 / 櫃買 資料層
 src/indicators.js  SMA EMA RSI MACD KD 布林 ATR
 src/news.js        新聞抓取與關鍵字情緒
-src/analysts/      五位分析師 + 投資長加權（technical / fundamental / chips / macro / sentiment / index）
+src/analysts/      六位分析師 + 投資長加權（technical / fundamental / chips / macro / sentiment / advisor / index）
+src/advisors.js    投顧來源 RSS、yt-dlp 字幕、Claude 整理
+scripts/advisors-push.mjs  本機把字幕推上雲端
 src/yahoo.js       國際市場（指數日線 + 期貨／美股含盤前盤後）
 src/taifex.js      期交所臺指期日盤／夜盤
 src/strategy.js    依綜合分數與風控產生買賣決策

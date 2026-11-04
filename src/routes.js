@@ -10,6 +10,7 @@ import { aiAvailable } from "./analyst.js";
 import { chatStream, CHAT_MAX } from "./chat.js";
 import { getTaifex } from "./taifex.js";
 import { getGlobalMarkets } from "./yahoo.js";
+import { getAdvisorItems, putTranscript } from "./advisors.js";
 import { storage, isServerless, backend } from "./storage.js";
 import { authEnabled, verifySession, verifyCron, checkPassword, issueSession, sessionCookie, clearCookie, parseCookies, COOKIE } from "./auth.js";
 
@@ -37,6 +38,16 @@ export const routes = {
   "GET /api/search": async (u) => searchStocks(u.searchParams.get("q"), 12),
   "GET /api/symbol": async (u) => symbolDetail(u.searchParams.get("code")),
   // 側欄即時報價：臺指期（45 秒快取）與美股／國際市場（1 分鐘快取），不綁在分析快照上
+  // 投顧來源最近集數（不含 Claude 整理）；本機腳本用它決定要抓哪些字幕
+  "GET /api/advisors/items": async () => ({ items: await getAdvisorItems(getState().config) }),
+  // 本機 npm run advisors-push 把 yt-dlp 抓到的字幕推上雲端（需要 CRON_SECRET）
+  "POST /api/advisors/transcripts": async (u, body, ctx) => {
+    if (!ctx.cron) throw new HttpError(403, "需要排程密鑰");
+    const list = Array.isArray(body.transcripts) ? body.transcripts : [];
+    let n = 0;
+    for (const t of list) if (/^[\w-]{6,20}$/.test(t.videoId || "")) { await putTranscript(t.videoId, t.text); n++; }
+    return { ok: true, stored: n };
+  },
   "GET /api/live": async () => { const [taifex, global] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]); return { t: taipeiNow(), taifex, global }; },
   "POST /api/config": async (u, body) => {
     const s = getState();
@@ -161,7 +172,7 @@ export async function handleApi(req) {
   if (!handler) return { status: 404, headers: {}, body: { error: "not found" } };
   const h = (k) => (req.headers.get ? req.headers.get(k) : req.headers[k]) || "";
   const cookies = parseCookies(h("cookie"));
-  const cron = key === "POST /api/cycle" && verifyCron(req.headers);
+  const cron = (key === "POST /api/cycle" || key === "POST /api/advisors/transcripts") && verifyCron(req.headers);
   const open = key === "POST /api/login" || key === "GET /api/health";
   // 雲端一定要設密碼，否則任何人都能看持股、用掉 Claude 額度
   if (isServerless && !authEnabled() && key !== "GET /api/health") return { status: 503, headers: {}, body: { error: "APP_PASSWORD 未設定，請在 Vercel 環境變數加入後重新部署" } };
