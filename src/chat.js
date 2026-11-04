@@ -178,7 +178,8 @@ async function runSettingTool(name, input, state, changed) {
     return { applied, radar: r, note: "下次掃描生效；要立刻看結果用 run_radar" };
   }
   if (name === "run_radar") {
-    const r = await runRadar(c.radar, { model: c.ai.model || "claude-opus-5-5", effort: "low" });
+    const r = await runRadar(c.radar, { model: c.ai.model || "claude-opus-5-5", effort: "low", budgetMs: isServerless ? 150 * 1000 : Infinity });
+    if (r.pending) return { pending: true, loaded: r.loaded, need: r.need, note: "全市場歷史資料第一次要分幾次抓，已快取的不會重抓；請對方過一兩分鐘再叫你掃一次" };
     state.radar = r; changed.add("radar"); changed.add("log");
     addLog(`投資長重掃飆股雷達：${r.candidates} 檔有訊號，挑 ${r.items.filter((x) => x.pick).length} 檔`);
     return { date: r.date, universe: r.universe, candidates: r.candidates, overview: r.overview, items: r.items.map((x) => ({ symbol: x.symbol, name: x.name, price: x.price, changePct: x.changePct, ret5: x.ret5, ret20: x.ret20, volRatio: x.volRatio, signals: x.signals, pick: x.pick })) };

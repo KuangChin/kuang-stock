@@ -125,7 +125,14 @@ function renderRadar() {
 async function runRadar(force = false) {
   if (radarBusy) return;
   radarBusy = true; renderRadar();
-  try { const r = await api("/api/radar", { force }); if (r.radar) S.radar = r.radar; }
+  try {
+    for (let i = 0; i < 6; i++) { // 雲端第一次要分幾次把 25 天抓完，自動接著叫
+      const r = await api("/api/radar", { force });
+      if (r.radar) { S.radar = r.radar; break; }
+      if (r.pending) { $("#radarNote").textContent = `第一次掃描：全市場歷史資料載入中（${r.loaded}/${r.need} 個交易日）…`; force = true; continue; }
+      break;
+    }
+  }
   catch (e) { toast("飆股雷達失敗：" + e.message, 6000); }
   finally { radarBusy = false; renderRadar(); }
 }

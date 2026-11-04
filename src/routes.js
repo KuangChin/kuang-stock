@@ -111,7 +111,8 @@ export const routes = {
     if (!body.force && s.radar?.t && Date.now() - new Date(s.radar.t) < 30 * 60 * 1000) return { radar: s.radar, cached: true };
     if (isServerless && !(await storage.lock("radar", 240))) throw new HttpError(409, "雷達正在掃描中，請稍後再看");
     try {
-      const r = await runRadar(s.config.radar, { model: s.config.ai.model || "claude-opus-5-5", effort: "low" });
+      const r = await runRadar(s.config.radar, { model: s.config.ai.model || "claude-opus-5-5", effort: "low", budgetMs: isServerless ? 170 * 1000 : Infinity });
+      if (r.pending) { addLog(`飆股雷達：歷史資料載入中（${r.loaded}/${r.need} 個交易日），下次呼叫繼續`); await saveState(["log"]); return { pending: true, loaded: r.loaded, need: r.need }; }
       s.radar = r;
       addLog(`飆股雷達：掃 ${r.universe} 檔，${r.candidates} 檔有訊號，投資長挑 ${(r.items || []).filter((x) => x.pick && x.pick.verdict !== "避開").length} 檔（${Math.round(r.durationMs / 1000)} 秒）`);
       await saveState(["radar", "log"]);

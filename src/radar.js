@@ -24,7 +24,7 @@ async function fetchDay(d) {
   if (hit) return hit;
   const slash = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
   const rows = {};
-  // 上市行情
+  // 上市行情（這個先抓，才知道是不是休市日）
   const mi = await getJson(`https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=${ymd(d)}&type=ALLBUT0999&response=json`);
   const t = (mi.tables || []).find((x) => /每日收盤行情/.test(x.title || ""));
   if (mi.stat !== "OK" || !t) { await storage.cacheSet(key, { holiday: true }).catch(() => {}); return { holiday: true }; }
@@ -33,45 +33,55 @@ async function fetchDay(d) {
     const close = num(r[8]); if (close == null) continue;
     rows[code] = [String(r[1]).trim(), num(r[5]), num(r[6]), num(r[7]), close, Math.round((num(r[2]) || 0) / 1000), num(r[4]) || 0, 0, 0, "tse"];
   }
-  await sleep(400);
-  // 上櫃行情
-  try {
-    const otc = await getJson(`https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${slash}&type=AL&response=json`);
-    for (const r of otc.tables?.[0]?.data || []) {
-      const code = String(r[0]).trim(); if (!isStock(code)) continue;
-      const close = num(r[2]); if (close == null) continue;
-      rows[code] = [String(r[1]).trim(), num(r[4]), num(r[5]), num(r[6]), close, Math.round((num(r[7]) || 0) / 1000), num(r[8]) || 0, 0, 0, "otc"];
-    }
-  } catch (e) { console.warn("[radar] otc", slash, e.message); }
-  await sleep(400);
-  // 法人：上市 T86（外資不含自營 col4、投信 col10）；上櫃 dailyTrade（外資不含自營 col4、投信 col13）
-  try {
-    const t86 = await getJson(`https://www.twse.com.tw/rwd/zh/fund/T86?date=${ymd(d)}&selectType=ALLBUT0999&response=json`);
-    for (const r of t86.data || []) { const c = String(r[0]).trim(); if (rows[c]) { rows[c][7] = Math.round((num(r[4]) || 0) / 1000); rows[c][8] = Math.round((num(r[10]) || 0) / 1000); } }
-  } catch (e) { console.warn("[radar] t86", ymd(d), e.message); }
-  await sleep(400);
-  try {
-    const oi = await getJson(`https://www.tpex.org.tw/www/zh-tw/insti/dailyTrade?type=Daily&sect=AL&date=${slash}&response=json`);
-    for (const r of oi.tables?.[0]?.data || []) { const c = String(r[0]).trim(); if (rows[c]) { rows[c][7] = Math.round((num(r[4]) || 0) / 1000); rows[c][8] = Math.round((num(r[13]) || 0) / 1000); } }
-  } catch (e) { console.warn("[radar] otc insti", slash, e.message); }
-  await sleep(400);
+  // 其餘三個來源分兩條線並行（證交所一條、櫃買一條），每條之間留 400ms 避免被封
+  const otcRows = {};
+  const tseLine = (async () => {
+    await sleep(400);
+    try {
+      const t86 = await getJson(`https://www.twse.com.tw/rwd/zh/fund/T86?date=${ymd(d)}&selectType=ALLBUT0999&response=json`);
+      for (const r of t86.data || []) { const c = String(r[0]).trim(); if (rows[c]) { rows[c][7] = Math.round((num(r[4]) || 0) / 1000); rows[c][8] = Math.round((num(r[10]) || 0) / 1000); } }
+    } catch (e) { console.warn("[radar] t86", ymd(d), e.message); }
+  })();
+  const otcLine = (async () => {
+    try {
+      const otc = await getJson(`https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${slash}&type=AL&response=json`);
+      for (const r of otc.tables?.[0]?.data || []) {
+        const code = String(r[0]).trim(); if (!isStock(code)) continue;
+        const close = num(r[2]); if (close == null) continue;
+        otcRows[code] = [String(r[1]).trim(), num(r[4]), num(r[5]), num(r[6]), close, Math.round((num(r[7]) || 0) / 1000), num(r[8]) || 0, 0, 0, "otc"];
+      }
+      await sleep(400);
+      const oi = await getJson(`https://www.tpex.org.tw/www/zh-tw/insti/dailyTrade?type=Daily&sect=AL&date=${slash}&response=json`);
+      for (const r of oi.tables?.[0]?.data || []) { const c = String(r[0]).trim(); if (otcRows[c]) { otcRows[c][7] = Math.round((num(r[4]) || 0) / 1000); otcRows[c][8] = Math.round((num(r[13]) || 0) / 1000); } }
+    } catch (e) { console.warn("[radar] otc", slash, e.message); }
+  })();
+  await Promise.all([tseLine, otcLine]);
+  Object.assign(rows, otcRows);
   await storage.cacheSet(key, rows).catch(() => {});
+  await sleep(300);
   return rows;
 }
 
 /** 最近 n 個交易日（舊 -> 新）：[{date, rows}] */
-export async function loadDays(n = 25) {
+/** 最近 n 個交易日（舊 -> 新）。budgetMs：抓新資料的時間預算，用完就先回已拿到的（雲端 300 秒上限，分幾次抓完）。 */
+export async function loadDays(n = 25, { budgetMs = Infinity } = {}) {
   const out = [];
+  const t0 = Date.now();
+  let partial = false;
   const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei" }));
   // 今天 15:00 前資料未必出來，從昨天起算
   if (d.getHours() < 15) d.setDate(d.getDate() - 1);
   for (let tries = 0; out.length < n && tries < n * 2 + 10; tries++, d.setDate(d.getDate() - 1)) {
     if (d.getDay() === 0 || d.getDay() === 6) continue;
+    const key = `radar:day:${ymd(d)}`;
+    const cached = await storage.cacheGet(key, null).catch(() => null);
+    if (!cached && Date.now() - t0 > budgetMs) { partial = true; break; }
     let rows;
-    try { rows = await fetchDay(new Date(d)); } catch (e) { console.warn("[radar] day", ymd(d), e.message); continue; }
+    try { rows = cached || (await fetchDay(new Date(d))); } catch (e) { console.warn("[radar] day", ymd(d), e.message); continue; }
     if (rows.holiday) continue;
     out.unshift({ date: ymd(d), rows });
   }
+  out.partial = partial;
   return out;
 }
 
@@ -152,11 +162,14 @@ async function aiPick(cands, cfg, { model, effort = "low", context = "" } = {}) 
 }
 
 /** 跑一次完整雷達：掃描 + 投資長挑選。回傳可直接存進 state.radar 的物件 */
-export async function runRadar(cfg = {}, { model = "claude-opus-5-5", effort = "low", context = "" } = {}) {
+export async function runRadar(cfg = {}, { model = "claude-opus-5-5", effort = "low", context = "", budgetMs = Infinity } = {}) {
   cfg = { ...DEFAULT_RADAR, ...cfg };
   const t0 = Date.now();
-  const days = await loadDays(25);
-  if (days.length < 21) throw new Error(`歷史資料不足（只拿到 ${days.length} 個交易日）`);
+  const days = await loadDays(25, { budgetMs });
+  if (days.length < 21) {
+    if (days.partial) return { pending: true, loaded: days.length, need: 21, durationMs: Date.now() - t0 };
+    throw new Error(`歷史資料不足（只拿到 ${days.length} 個交易日）`);
+  }
   const all = scan(days, cfg);
   const top = all.slice(0, Math.max(cfg.topN, 20));
   let ai = null;
