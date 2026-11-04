@@ -91,7 +91,7 @@ export const routes = {
     return r;
   },
   // 排程密鑰可讀最近的系統日誌（排錯用）
-  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); return { log: (getState().log || []).slice(0, Number(u.searchParams.get("n") || 30)) }; },
+  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
   "POST /api/backtest": async (u, body) => {
     if (isServerless) {
       body = { ...body, symbols: (body.symbols || []).slice(0, CLOUD_LIMITS.backtestSymbols), days: Math.min(Number(body.days) || 120, CLOUD_LIMITS.backtestDays), months: 9 };
