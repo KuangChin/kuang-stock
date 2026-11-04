@@ -89,6 +89,7 @@ node src/cli.js backtest 2330,2317,2454 1000000 2025-01-01:2025-06-30   # 指定
 - 追蹤清單：新增、移除、整份換掉（例如「鎖定 AI 族群」他會自己挑代表性標的並查代碼）
 - 風控：停損、停利、單一持股上限、每筆比例、保留現金、買賣門檻、持股檔數、冷卻天數；可要求「停損固定」，之後自動調參不會改它
 - 六位分析師權重
+- 查歷史走勢（加權指數、台指期近月連續、費半、S&P 500、VIX、美元台幣、個股；天數或起迄日期）
 - 回測（預設最近 240 個交易日，也可以講時間段像「跑 2025 上半年」；雲端最多 10 檔、250 天；只用技術線型分析師）
 
 他不能下單、不能開關自動執行，這兩件事要在頁面上做。
@@ -183,6 +184,7 @@ scripts/migrate-state.mjs  把 data/state.json 匯入 Redis
 .github/workflows/cycle.yml  排程呼叫 /api/cycle
 .claude/agents/    Claude Code sub-agent 定義（/analyze 使用）
 src/backtest.js    歷史回測
+src/history.js     指數／台指期／國際市場／個股日線歷史（投資長查走勢用）
 src/server.js      本機 HTTP 伺服器（靜態頁 + API + 排程）
 public/            前端（無框架）
 data/state.json    帳戶狀態（git 忽略）

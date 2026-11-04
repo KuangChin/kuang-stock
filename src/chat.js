@@ -9,6 +9,7 @@ import { isServerless } from "./storage.js";
 import { DEFAULT_WEIGHTS, LABELS } from "./analysts/index.js";
 import { getTaifex } from "./taifex.js";
 import { getGlobalMarkets } from "./yahoo.js";
+import { getSeries, summarizeSeries, SERIES } from "./history.js";
 
 export const CHAT_MAX = 40; // 保留的對話則數
 const sign = (v, d = 1) => (v == null ? "--" : (v > 0 ? "+" : "") + Number(v).toFixed(d));
@@ -20,6 +21,7 @@ const SYSTEM = `你是「投資長」，主持一個台股模擬交易帳戶的�
 3. 這是模擬帳戶，你不能直接下單；若建議操作，說清楚標的、方向、股數或比例、觸發條件，請對方在頁面按「分析並模擬下單」或手動下單。
    你可以用工具修改設定：追蹤清單（add_watchlist / remove_watchlist / set_watchlist）、風控參數（set_risk，例如停損、單一持股上限、買賣門檻）、
    六位分析師的權重（set_weights）、跑回測（run_backtest）、查目前設定（get_settings）。對方給的是名稱時先用 search_stock 查到正確代碼。
+   對方問過去一段時間的走勢（加權指數、台指期、費半、S&P 500、VIX、匯率、個股）時，用 get_history 拿日線摘要再回答，不要說拿不到。
    對方要「鎖定某個族群」時，自己挑出該族群在台股的代表性標的（用 search_stock 確認代碼），用 set_watchlist 整份換掉，並說明挑了哪些、為什麼。
    改完用幾句話回報改了什麼、現在的值是多少。回測結果要講報酬、最大回撤、交易次數、與 0050 同期比較，並給一句評語。追蹤清單的股票會在下一輪分析納入。
 4. 回答長度看問題：閒聊或簡單問題兩三句就好；分析類問題用短段落或條列，不要超過 300 字，除非對方要求詳細。
@@ -105,6 +107,7 @@ const TOOLS = [
   { name: "get_settings", description: "讀目前的風控參數、分析師權重、追蹤清單、自動執行與 AI 設定。", input_schema: { type: "object", properties: {} } },
   { name: "set_risk", description: "修改風控參數，只需給要改的欄位。百分比欄位用 0～100 的數字（停損 30 代表 30%；單一持股不設限給 maxPositionPct 100）。lockStopLoss=true 表示停損固定，自動調參不得更動。", input_schema: { type: "object", properties: { stopLossPct: { type: "number" }, takeProfitPct: { type: "number" }, maxPositionPct: { type: "number" }, perTradePct: { type: "number" }, minCashPct: { type: "number" }, buyThreshold: { type: "number", description: "綜合分數 -8～+8，達此值買進" }, sellThreshold: { type: "number" }, maxPositions: { type: "integer" }, cooldownDays: { type: "integer" }, lockStopLoss: { type: "boolean" } } } },
   { name: "set_weights", description: "調整六位分析師的權重（technical 技術、fundamental 基本面、chips 籌碼、macro 總經、sentiment 情緒、advisor 投顧），用 0～100 的數字，只需給要改的；系統會自動把總和正規化成 100%。", input_schema: { type: "object", properties: { technical: { type: "number" }, fundamental: { type: "number" }, chips: { type: "number" }, macro: { type: "number" }, sentiment: { type: "number" }, advisor: { type: "number" } } } },
+  { name: "get_history", description: "拿日線歷史摘要（報酬、高低點與日期、最大回撤、均線、約 50 個取樣點）。series 可多個：taiex 加權指數、tx 台指期近月連續、sox 費城半導體、sp500、nasdaq、vix、usdtwd 美元台幣、us10y 美債十年、dxy 美元指數、tsm 台積電ADR、nvda，或 4～6 位數台股代碼。時間段用 days（預設 240 個交易日）或 from/to（YYYY-MM-DD）。", input_schema: { type: "object", properties: { series: { type: "array", items: { type: "string" } }, days: { type: "integer" }, from: { type: "string" }, to: { type: "string" } }, required: ["series"] } },
   { name: "run_backtest", description: "用目前風控參數回測（只用技術線型分析師，沒有籌碼與新聞的歷史）。時間段兩種給法：days（最近 N 個交易日，預設 240）或 from/to（YYYY-MM-DD，指定起迄日期，例如「跑 2025 上半年」就是 from 2025-01-01、to 2025-06-30；只給 from 就跑到今天）。symbols 不給就用追蹤清單＋持股。要花 30～120 秒。", input_schema: { type: "object", properties: { days: { type: "integer" }, from: { type: "string", description: "起日 YYYY-MM-DD" }, to: { type: "string", description: "迄日 YYYY-MM-DD" }, symbols: { type: "array", items: { type: "string" } } } } },
 ];
 const PCT_FIELDS = ["stopLossPct", "takeProfitPct", "maxPositionPct", "perTradePct", "minCashPct"];
@@ -166,6 +169,17 @@ async function runSettingTool(name, input, state, changed) {
     const txt = Object.keys(DEFAULT_WEIGHTS).map((k) => `${LABELS[k]} ${Math.round(w[k] * 100)}%`).join("、");
     addLog(`投資長調整權重：${txt}`);
     return { weights: txt };
+  }
+  if (name === "get_history") {
+    const list = [...new Set((input?.series || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))].slice(0, 6);
+    if (!list.length) return { error: "series 要給至少一個", available: Object.keys(SERIES) };
+    const days = Math.min(1200, Math.max(20, Number(input?.days) || 240));
+    const { from, to } = normalizeRange(input || {});
+    const out = [];
+    for (const k of list) {
+      try { out.push(summarizeSeries(await getSeries(k, { days, from, to }))); } catch (e) { out.push({ series: k, error: e.message }); }
+    }
+    return { results: out, note: "台指期是每天成交量最大的一般時段合約接起來的近月連續，換月當天會有價差" };
   }
   if (name === "run_backtest") {
     let symbols = (input?.symbols || []).map(String).filter((x) => /^\d{4,6}$/.test(x));
