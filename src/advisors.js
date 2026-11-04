@@ -44,11 +44,31 @@ async function fetchText(url) {
   throw err;
 }
 
+// RSS 被擋時（YouTube 會對某些 IP 整個回 404）本機改用 yt-dlp 讀上傳清單（含直播存檔），逐片取日期與說明
+async function youtubeItemsViaYtdlp(src) {
+  const bin = await ytdlpPath();
+  if (!bin || isServerless) throw new Error("沒有 yt-dlp");
+  const out = await new Promise((res, rej) => execFile(bin, ["--no-warnings", "--playlist-end", String(PER_SOURCE), "--extractor-args", "youtube:lang=zh-TW", "--print", "%(.{id,timestamp,upload_date,title,description})j", `https://www.youtube.com/playlist?list=UU${src.channelId.slice(2)}`], { timeout: 180000, maxBuffer: 8e6 }, (e, so) => (e && !so ? rej(new Error("yt-dlp 清單失敗")) : res(so || ""))));
+  const items = [];
+  for (const line of out.split("\n")) {
+    if (!line.trim().startsWith("{")) continue;
+    try {
+      const v = JSON.parse(line);
+      const ts = v.timestamp ? new Date(v.timestamp * 1000) : v.upload_date ? new Date(`${v.upload_date.slice(0, 4)}-${v.upload_date.slice(4, 6)}-${v.upload_date.slice(6, 8)}T01:00:00Z`) : null;
+      items.push({ id: `yt:${v.id}`, videoId: v.id, source: src.id, sourceName: src.name, type: "youtube", title: String(v.title || ""), link: `https://www.youtube.com/watch?v=${v.id}`, published: ts ? ts.toISOString() : null, description: String(v.description || "").replace(/\s+/g, " ").slice(0, 600) });
+    } catch {}
+  }
+  if (!items.length) throw new Error("yt-dlp 清單為空");
+  return items;
+}
 async function youtubeItems(src) {
-  // 頻道 feed 很常隨機 404/500；失敗就改用上傳清單 feed（UU + 頻道 id 去掉 UC）
+  // 頻道 feed 很常隨機 404/500；失敗就改用上傳清單 feed（UU + 頻道 id 去掉 UC），再不行用 yt-dlp
   let xml;
   try { xml = await fetchText(`https://www.youtube.com/feeds/videos.xml?channel_id=${src.channelId}`); }
-  catch { xml = await fetchText(`https://www.youtube.com/feeds/videos.xml?playlist_id=UU${src.channelId.slice(2)}`); }
+  catch {
+    try { xml = await fetchText(`https://www.youtube.com/feeds/videos.xml?playlist_id=UU${src.channelId.slice(2)}`); }
+    catch (e) { return youtubeItemsViaYtdlp(src).catch(() => { throw e; }); }
+  }
   const out = [];
   for (const m of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
     const b = m[1];
@@ -86,6 +106,7 @@ export async function getAdvisorItems(config) {
     let items;
     try {
       items = src.type === "podcast" ? await podcastItems(src) : await youtubeItems(src);
+      items = items.filter((x) => x.published).sort((a, b) => b.published.localeCompare(a.published)).slice(0, 12);
       if (items.length) await storage.cacheSet(skey, items).catch(() => {});
     } catch (e) {
       items = (await storage.cacheGet(skey, 3 * 86400e3).catch(() => null)) || []; // 抓不到就用三天內的舊清單
@@ -148,6 +169,15 @@ export async function getTranscript(videoId, { fetchIfMissing = !isServerless } 
 }
 /** 由外部（本機腳本）寫入字幕，雲端用 */
 export async function putTranscript(videoId, text) { await storage.cacheSet(`transcript:${videoId}`, String(text || "").slice(0, 40000)); }
+/** 由外部寫入各來源的集數清單（雲端抓不到 YouTube 時用），並清掉合併清單快取讓下一輪重算 */
+export async function putSourceItems(items, config) {
+  const by = {};
+  for (const it of items || []) if (it?.source && it.id && it.published) (by[it.source] ||= []).push(it);
+  for (const [sid, list] of Object.entries(by)) await storage.cacheSet(`advisors:src:${sid}`, list.slice(0, 12));
+  const sources = advisorSources(config);
+  await storage.del("cache:advisors:items:" + sources.map((s) => s.id).join(",")).catch(() => {});
+  return Object.keys(by);
+}
 
 // ---------- Claude 整理 ----------
 const Stance = z.enum(["bullish", "bearish", "neutral"]);

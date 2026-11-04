@@ -10,7 +10,7 @@ import { aiAvailable } from "./analyst.js";
 import { chatStream, CHAT_MAX } from "./chat.js";
 import { getTaifex } from "./taifex.js";
 import { getGlobalMarkets } from "./yahoo.js";
-import { getAdvisorItems, putTranscript } from "./advisors.js";
+import { getAdvisorItems, putTranscript, putSourceItems } from "./advisors.js";
 import { storage, isServerless, backend } from "./storage.js";
 import { authEnabled, verifySession, verifyCron, checkPassword, issueSession, sessionCookie, clearCookie, parseCookies, COOKIE } from "./auth.js";
 
@@ -46,8 +46,9 @@ export const routes = {
     const list = Array.isArray(body.transcripts) ? body.transcripts : [];
     let n = 0;
     for (const t of list) if (/^[\w-]{6,20}$/.test(t.videoId || "")) { await putTranscript(t.videoId, t.text); n++; }
-    await storage.cacheSet("advisors:lastPush", { t: taipeiNow(), stored: n, videos: list.map((t) => t.videoId).slice(0, 20), report: body.report || null }).catch(() => {});
-    return { ok: true, stored: n };
+    const sources = Array.isArray(body.items) && body.items.length ? await putSourceItems(body.items, getState().config) : [];
+    await storage.cacheSet("advisors:lastPush", { t: taipeiNow(), stored: n, items: (body.items || []).length, sources, videos: list.map((t) => t.videoId).slice(0, 20), report: body.report || null }).catch(() => {});
+    return { ok: true, stored: n, sources };
   },
   "GET /api/live": async () => { const [taifex, global] = await Promise.all([getTaifex().catch(() => null), getGlobalMarkets().catch(() => ({}))]); return { t: taipeiNow(), taifex, global }; },
   "POST /api/config": async (u, body) => {
@@ -173,7 +174,7 @@ export async function handleApi(req) {
   if (!handler) return { status: 404, headers: {}, body: { error: "not found" } };
   const h = (k) => (req.headers.get ? req.headers.get(k) : req.headers[k]) || "";
   const cookies = parseCookies(h("cookie"));
-  const cron = (key === "POST /api/cycle" || key === "POST /api/advisors/transcripts") && verifyCron(req.headers);
+  const cron = (key === "POST /api/cycle" || key === "POST /api/advisors/transcripts" || key === "GET /api/advisors/items") && verifyCron(req.headers);
   const open = key === "POST /api/login" || key === "GET /api/health";
   // 雲端一定要設密碼，否則任何人都能看持股、用掉 Claude 額度
   if (isServerless && !authEnabled() && key !== "GET /api/health") return { status: 503, headers: {}, body: { error: "APP_PASSWORD 未設定，請在 Vercel 環境變數加入後重新部署" } };
