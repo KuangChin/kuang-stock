@@ -11,7 +11,7 @@ import { loadEnv } from "./env.js";
 import { storage, isServerless } from "./storage.js";
 
 export const DEFAULT_ADVISORS = [
-  { id: "john", name: "請支援輸贏（林睿閎 John）", type: "youtube", channelId: "UCXB8cCqwOHP3BmyhYLAUs0g" },
+  { id: "john", name: "請支援輸贏（林睿閎 John）", type: "youtube", channelId: "UCXB8cCqwOHP3BmyhYLAUs0g", titleFilter: "請支援輸贏" }, // 頻道還有其他影片，只取這個節目
   { id: "commuter", name: "給通勤族的飆股報告書", type: "youtube", channelId: "UCyqcTH_Hvx3wJYLDRZ5GCSw" },
   { id: "yu", name: "游庭皓的財經皓角", type: "youtube", channelId: "UC0lbAQVpenvfA2QqzsRtL_g" },
   { id: "gooaye", name: "股癌（Podcast）", type: "podcast", feedUrl: "https://feeds.soundon.fm/podcasts/954689a5-3096-43a4-a80b-7810b219cef3.xml" },
@@ -106,6 +106,7 @@ export async function getAdvisorItems(config) {
     let items;
     try {
       items = src.type === "podcast" ? await podcastItems(src) : await youtubeItems(src);
+      if (src.titleFilter) items = items.filter((x) => new RegExp(src.titleFilter).test(x.title));
       items = items.filter((x) => x.published).sort((a, b) => b.published.localeCompare(a.published)).slice(0, 12);
       if (items.length) await storage.cacheSet(skey, items).catch(() => {});
     } catch (e) {
