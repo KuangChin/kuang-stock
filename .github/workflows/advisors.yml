@@ -1,0 +1,28 @@
+# 抓投顧 YouTube 自動字幕並推到雲端（Vercel 本身抓不到字幕）。
+# 台北 07:40（游庭皓早上那集通常 09:00 前上）與 12:30、18:30 各跑一次；也可手動 Run workflow。
+# 需要 repo secrets：APP_URL、CRON_SECRET（與 auto-cycle 相同）。
+# 若 YouTube 擋 GitHub 的 IP（429 或要求登入），改在本機跑 npm run advisors-push。
+name: advisors-transcripts
+on:
+  schedule:
+    - cron: "40 23 * * 0-4"
+    - cron: "30 4 * * 1-5"
+    - cron: "30 10 * * 1-5"
+  workflow_dispatch:
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install yt-dlp
+        run: python3 -m pip install --user -q yt-dlp && ~/.local/bin/yt-dlp --version
+      - name: Fetch subtitles and push
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          YTDLP: /home/runner/.local/bin/yt-dlp
+        run: node scripts/advisors-push.mjs

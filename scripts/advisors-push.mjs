@@ -13,7 +13,9 @@ const items = await getAdvisorItems({});
 const yt = items.filter((x) => x.type === "youtube");
 console.log(`最近一週 ${items.length} 集，其中 YouTube ${yt.length} 集`);
 const transcripts = [];
+let n = 0;
 for (const it of yt) {
+  if (n++) await new Promise((r) => setTimeout(r, 6000)); // YouTube 對字幕限流，慢慢抓
   const text = await getTranscript(it.videoId, { fetchIfMissing: true });
   console.log(`- ${it.sourceName}「${it.title.slice(0, 40)}」字幕 ${text ? text.length + " 字" : "無"}`);
   if (text) transcripts.push({ videoId: it.videoId, text });
