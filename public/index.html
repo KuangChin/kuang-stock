@@ -47,7 +47,7 @@
 
       <section class="card">
         <div class="card-head"><h2>持股</h2><span class="muted" id="posNote"></span></div>
-        <div class="table-wrap"><table id="posTable"><thead><tr><th>代碼</th><th>名稱</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">漲跌%</th><th class="num">市值</th><th class="num">損益</th><th class="num">損益%</th><th>訊號</th></tr></thead><tbody></tbody></table></div>
+        <div class="table-wrap"><table id="posTable"><thead><tr><th>代碼</th><th>名稱</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">漲跌%</th><th class="num">市值</th><th class="num">損益</th><th class="num">損益%</th><th class="num">融資</th><th>訊號</th></tr></thead><tbody></tbody></table></div>
       </section>
 
       <section class="card">
@@ -118,6 +118,7 @@
           <form id="orderForm" class="inline-form">
             <select name="side"><option value="BUY">買進</option><option value="SELL">賣出</option></select>
             <input name="shares" type="number" value="1000" min="1" step="1"> 股
+            <label><input name="margin" type="checkbox"> 融資</label>
             <button class="btn" type="submit">送出</button>
           </form>
         </div>
@@ -135,9 +136,21 @@
       <h3>帳戶（重設會清空交易紀錄）</h3>
       <label>存款 / 現金 <input name="cash" type="number" step="1000" value="1000000"></label>
       <h4>目前持股</h4>
-      <table id="posEdit"><thead><tr><th>代碼</th><th>股數</th><th>平均成本</th><th></th></tr></thead><tbody></tbody></table>
+      <table id="posEdit"><thead><tr><th>代碼</th><th>股數</th><th>平均成本</th><th>融資金額</th><th></th></tr></thead><tbody></tbody></table>
+      <p class="muted small">融資金額：這檔目前向券商借的錢（整張、以千元計）；留空或 0 表示現股。</p>
       <button type="button" class="btn ghost" id="addPosRow">+ 新增持股</button>
       <button type="button" class="btn" id="btnReset">套用並重設帳戶</button>
+
+      <h3>融資</h3>
+      <p class="muted small">開啟後，系統與投資長的買進以融資整張為主，現金只付自備款；利息按日累計、賣出時扣。總資產會扣掉融資餘額與利息。整戶維持率（融資持股市值 ÷ 融資餘額）低於追繳線時，下一輪會先斷頭虧最多的那檔。</p>
+      <div class="param-grid">
+        <label><input name="marginEnabled" type="checkbox"> 以融資買進</label>
+        <label>上市成數 % <input name="marginTse" type="number" step="5" min="0" max="90"></label>
+        <label>上櫃成數 % <input name="marginOtc" type="number" step="5" min="0" max="90"></label>
+        <label>年利率 % <input name="marginRate" type="number" step="0.05" min="0" max="20"></label>
+        <label>追繳維持率 % <input name="marginMaint" type="number" step="5" min="100" max="200"></label>
+        <label><input name="marginForce" type="checkbox"> 低於追繳線自動斷頭</label>
+      </div>
 
       <h3>觀察清單</h3>
       <div id="watchChips" class="chips"></div>

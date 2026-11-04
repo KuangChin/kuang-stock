@@ -14,7 +14,7 @@ const SPACE = {
 const pick = (arr, rnd) => arr[Math.floor(rnd() * arr.length)];
 function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-export async function tuneRisk({ symbols, cash = 1000000, days = 120, baseRisk = {}, fees, trials = 40, seed = 42, onProgress } = {}) {
+export async function tuneRisk({ symbols, cash = 1000000, days = 120, baseRisk = {}, fees, margin = null, trials = 40, seed = 42, onProgress } = {}) {
   const histories = await loadHistories([...symbols, "0050"], 12);
   const rnd = mulberry32(seed);
   const candidates = [{ ...DEFAULT_RISK, ...baseRisk }]; // 先放目前參數當基準
@@ -26,7 +26,7 @@ export async function tuneRisk({ symbols, cash = 1000000, days = 120, baseRisk =
   const results = [];
   for (let i = 0; i < candidates.length; i++) {
     const risk = candidates[i];
-    const r = await runBacktest({ symbols, cash, days, risk, fees, histories });
+    const r = await runBacktest({ symbols, cash, days, risk, fees, histories, margin });
     const fitness = r.returnPct - 0.5 * r.maxDrawdownPct - (r.trades < 3 ? 5 : 0);
     results.push({ risk, returnPct: r.returnPct, maxDrawdownPct: r.maxDrawdownPct, trades: r.trades, winRate: r.winRate, benchmarkReturnPct: r.benchmarkReturnPct, fitness: +fitness.toFixed(2), isCurrent: i === 0 });
     onProgress?.(i + 1, candidates.length);

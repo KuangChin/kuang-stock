@@ -20,7 +20,8 @@ const SYSTEM = `你是「投資長」，主持一個台股模擬交易帳戶的�
 2. 用繁體中文、台灣用語，口吻像一位務實的投資長：直接、具體、講理由，不說教，不免責聲明連篇。
 3. 這是模擬帳戶，你不能直接下單；若建議操作，說清楚標的、方向、股數或比例、觸發條件，請對方在頁面按「分析並模擬下單」或手動下單。
    你可以用工具修改設定：追蹤清單（add_watchlist / remove_watchlist / set_watchlist）、風控參數（set_risk，例如停損、單一持股上限、買賣門檻）、
-   六位分析師的權重（set_weights）、跑回測（run_backtest）、查目前設定（get_settings）。對方給的是名稱時先用 search_stock 查到正確代碼。
+   六位分析師的權重（set_weights）、融資設定（set_margin：開關、成數、利率、追繳維持率、是否自動斷頭）、跑回測（run_backtest）、查目前設定（get_settings）。對方給的是名稱時先用 search_stock 查到正確代碼。
+   融資開著時要提醒槓桿：虧損以自備款計會放大，維持率接近追繳線要先減碼，不要等斷頭。
    對方問過去一段時間的走勢（加權指數、台指期、費半、S&P 500、VIX、匯率、個股）時，用 get_history 拿日線摘要再回答，不要說拿不到。
    對方要「鎖定某個族群」時，自己挑出該族群在台股的代表性標的（用 search_stock 確認代碼），用 set_watchlist 整份換掉，並說明挑了哪些、為什麼。
    改完用幾句話回報改了什麼、現在的值是多少。回測結果要講報酬、最大回撤、交易次數、與 0050 同期比較，並給一句評語。追蹤清單的股票會在下一輪分析納入。
@@ -37,8 +38,10 @@ export function buildContext(state) {
   if (lc?.analyses) for (const [s, a] of Object.entries(lc.analyses)) quotes[s] = { price: a.price, name: a.name };
   const val = valuation(state, quotes);
   L.push(`# 帳戶`);
-  L.push(`起始資產 ${state.initialEquity}；現金 ${val.cash}；持股市值 ${val.marketValue}；總資產 ${val.total}；累積報酬 ${sign(val.returnPct, 2)}%。`);
-  for (const r of val.rows) L.push(`- ${r.symbol} ${r.name}：${r.shares} 股，成本 ${r.avgCost}，現價 ${r.price}，損益 ${sign(r.pnl, 0)}（${sign(r.pnlPct, 2)}%）`);
+  L.push(`起始資產 ${state.initialEquity}；現金 ${val.cash}；持股市值 ${val.marketValue}；${val.loan ? `融資餘額 ${val.loan}（未付利息 ${val.interest}，整戶維持率 ${val.maintenance}%，追繳線 ${val.maintenanceLine}%${val.marginCall ? "，已低於追繳線，下一輪會斷頭" : ""}）；` : ""}總資產 ${val.total}（已扣融資）；累積報酬 ${sign(val.returnPct, 2)}%。`);
+  for (const r of val.rows) L.push(`- ${r.symbol} ${r.name}：${r.shares} 股，成本 ${r.avgCost}，現價 ${r.price}，損益 ${sign(r.pnl, 0)}（${sign(r.pnlPct, 2)}%）${r.loan ? `，融資 ${r.loan}，維持率 ${r.maintenance}%` : "，現股"}`);
+  const mg = state.config.margin || {};
+  L.push(`融資模式：${mg.enabled ? `開（上市 ${Math.round(mg.ratioTse * 100)}%／上櫃 ${Math.round(mg.ratioOtc * 100)}% 成數，年利率 ${(mg.interestRate * 100).toFixed(2)}%，追繳維持率 ${Math.round(mg.maintenance * 100)}%，${mg.forceSell === false ? "低於只警示" : "低於自動斷頭"}）；買進以融資整張為主，現金只付自備款` : "關（全部現股）"}。`);
   if (!val.rows.length) L.push(`- 無持股`);
   const rk = state.config.risk;
   L.push(`風控：停損 ${rk.stopLossPct * 100}%、停利 ${rk.takeProfitPct * 100}%（減半）、單一持股上限 ${rk.maxPositionPct * 100}%、每筆 ${rk.perTradePct * 100}%、保留現金 ${rk.minCashPct * 100}%、買進門檻 ${rk.buyThreshold}、賣出門檻 ${rk.sellThreshold}、冷卻 ${rk.cooldownDays} 天、最多 ${rk.maxPositions} 檔。`);
@@ -108,6 +111,7 @@ const TOOLS = [
   { name: "get_settings", description: "讀目前的風控參數、分析師權重、追蹤清單、自動執行與 AI 設定。", input_schema: { type: "object", properties: {} } },
   { name: "set_risk", description: "修改風控參數，只需給要改的欄位。百分比欄位用 0～100 的數字（停損 30 代表 30%；單一持股不設限給 maxPositionPct 100）。lockStopLoss=true 表示停損固定，自動調參不得更動。", input_schema: { type: "object", properties: { stopLossPct: { type: "number" }, takeProfitPct: { type: "number" }, maxPositionPct: { type: "number" }, perTradePct: { type: "number" }, minCashPct: { type: "number" }, buyThreshold: { type: "number", description: "綜合分數 -8～+8，達此值買進" }, sellThreshold: { type: "number" }, maxPositions: { type: "integer" }, cooldownDays: { type: "integer" }, lockStopLoss: { type: "boolean" } } } },
   { name: "set_weights", description: "調整六位分析師的權重（technical 技術、fundamental 基本面、chips 籌碼、macro 總經、sentiment 情緒、advisor 投顧），用 0～100 的數字，只需給要改的；系統會自動把總和正規化成 100%。", input_schema: { type: "object", properties: { technical: { type: "number" }, fundamental: { type: "number" }, chips: { type: "number" }, macro: { type: "number" }, sentiment: { type: "number" }, advisor: { type: "number" } } } },
+  { name: "set_margin", description: "修改融資設定，只給要改的欄位：enabled 開關；ratioTse 上市成數、ratioOtc 上櫃成數、interestRate 年利率、maintenance 追繳維持率，都用 0～200 的百分比數字（上市 60 代表六成、利率 6.5、維持率 130）；forceSell 低於追繳線是否自動斷頭。", input_schema: { type: "object", properties: { enabled: { type: "boolean" }, ratioTse: { type: "number" }, ratioOtc: { type: "number" }, interestRate: { type: "number" }, maintenance: { type: "number" }, forceSell: { type: "boolean" } } } },
   { name: "get_history", description: "拿日線歷史摘要（報酬、高低點與日期、最大回撤、均線、約 50 個取樣點）。series 可多個：taiex 加權指數、tx 台指期近月連續、sox 費城半導體、sp500、nasdaq、vix、usdtwd 美元台幣、us10y 美債十年、dxy 美元指數、tsm 台積電ADR、nvda，或 4～6 位數台股代碼。時間段用 days（預設 240 個交易日）或 from/to（YYYY-MM-DD）。", input_schema: { type: "object", properties: { series: { type: "array", items: { type: "string" } }, days: { type: "integer" }, from: { type: "string" }, to: { type: "string" } }, required: ["series"] } },
   { name: "run_backtest", description: "用目前風控參數回測（只用技術線型分析師，沒有籌碼與新聞的歷史）。時間段兩種給法：days（最近 N 個交易日，預設 240）或 from/to（YYYY-MM-DD，指定起迄日期，例如「跑 2025 上半年」就是 from 2025-01-01、to 2025-06-30；只給 from 就跑到今天）。symbols 不給就用追蹤清單＋持股。要花 30～120 秒。", input_schema: { type: "object", properties: { days: { type: "integer" }, from: { type: "string", description: "起日 YYYY-MM-DD" }, to: { type: "string", description: "迄日 YYYY-MM-DD" }, symbols: { type: "array", items: { type: "string" } } } } },
 ];
@@ -147,7 +151,19 @@ async function runTool(name, input, state, changed) {
 }
 async function runSettingTool(name, input, state, changed) {
   const c = state.config;
-  if (name === "get_settings") return { risk: c.risk, weights: c.weights, watchlist: c.watchlist, auto: c.auto, ai: { enabled: c.ai.enabled, model: c.ai.model } };
+  if (name === "get_settings") return { risk: c.risk, margin: c.margin, weights: c.weights, watchlist: c.watchlist, auto: c.auto, ai: { enabled: c.ai.enabled, model: c.ai.model } };
+  if (name === "set_margin") {
+    const m = c.margin = { ...c.margin }, applied = {};
+    for (const [k, v] of Object.entries(input || {})) {
+      if (v == null) continue;
+      if (k === "enabled" || k === "forceSell") { m[k] = Boolean(v); applied[k] = Boolean(v); }
+      else if (["ratioTse", "ratioOtc", "interestRate", "maintenance"].includes(k)) { const n = Number(v); if (!Number.isFinite(n) || n < 0 || n > 200) return { error: `${k} 要在 0～200（百分比）` }; m[k] = +(n / 100).toFixed(4); applied[k] = `${n}%`; }
+    }
+    if (!Object.keys(applied).length) return { error: "沒有可套用的欄位" };
+    changed.add("config"); changed.add("log");
+    addLog(`投資長修改融資設定：${Object.entries(applied).map(([k, v]) => `${k}=${v}`).join("、")}`);
+    return { applied, margin: m };
+  }
   if (name === "set_risk") {
     const before = { ...c.risk }, applied = {};
     for (const [k, v] of Object.entries(input || {})) {
@@ -189,11 +205,11 @@ async function runSettingTool(name, input, state, changed) {
     const { from, to } = normalizeRange(input || {});
     if (isServerless) { symbols = symbols.slice(0, CLOUD_BT.symbols); days = Math.min(days, CLOUD_BT.days); }
     const months = Math.ceil((days + 65) / 21) + 1; // 回測需要 65 天暖機
-    const r = await runBacktest({ symbols, cash: state.initialEquity || c.initialCash, days, from, to, maxDays: isServerless ? CLOUD_BT.days : null, risk: c.risk, fees: c.fees, months });
+    const r = await runBacktest({ symbols, cash: state.initialEquity || c.initialCash, days, from, to, maxDays: isServerless ? CLOUD_BT.days : null, risk: c.risk, fees: c.fees, margin: c.margin, months });
     if (r.error) return { error: r.error, from, to };
     const span = from ? `${r.start}～${r.end}` : `${days} 天`;
     addLog(`投資長回測 ${symbols.length} 檔 ${span}：報酬 ${r.returnPct}%，回撤 ${r.maxDrawdownPct}%，0050 ${r.benchmarkReturnPct}%`); changed.add("log");
-    return { symbols: r.symbols, days: r.days, start: r.start, end: r.end, returnPct: r.returnPct, benchmarkReturnPct: r.benchmarkReturnPct, maxDrawdownPct: r.maxDrawdownPct, trades: r.trades, sells: r.sells, winRate: r.winRate, realized: r.realized, finalEquity: r.finalEquity, note: (r.truncated ? `雲端最多 ${CLOUD_BT.days} 個交易日，實際從 ${r.start} 起算。` : "") + "只用技術線型分析師回測；籌碼、新聞、投顧沒有歷史快照" };
+    return { symbols: r.symbols, days: r.days, start: r.start, end: r.end, returnPct: r.returnPct, benchmarkReturnPct: r.benchmarkReturnPct, maxDrawdownPct: r.maxDrawdownPct, trades: r.trades, sells: r.sells, winRate: r.winRate, realized: r.realized, finalEquity: r.finalEquity, margin: r.margin, note: (r.truncated ? `雲端最多 ${CLOUD_BT.days} 個交易日，實際從 ${r.start} 起算。` : "") + "只用技術線型分析師回測；籌碼、新聞、投顧沒有歷史快照" };
   }
   return null;
 }

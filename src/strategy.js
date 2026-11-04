@@ -18,13 +18,30 @@ export const DEFAULT_RISK = {
  * 產生決策清單。
  * positions: {symbol:{shares,avgCost}}; analyses: {symbol:{score,reasons,price,quote}}
  */
-export function decide({ analyses, positions, cash, totalEquity, risk = DEFAULT_RISK, lastBuyDays = {} }) {
+/**
+ * margin：{ enabled, ratio: {symbol: 成數}, maintenance（倍數，如 1.3）, forceSell, currentRatio（整戶維持率 %，null 表示沒有融資） }
+ * 開啟融資時，買進決策帶 margin:true（整張）；現金只需自備款。維持率低於追繳線且 forceSell 時，先斷頭虧最多的融資持股。
+ */
+export function decide({ analyses, positions, cash, totalEquity, risk = DEFAULT_RISK, lastBuyDays = {}, margin = null }) {
   risk = { ...DEFAULT_RISK, ...risk };
   const decisions = [];
   const held = Object.keys(positions).filter((s) => positions[s].shares > 0);
+  const useMargin = Boolean(margin?.enabled);
+
+  // 融資追繳：整戶維持率低於門檻就斷頭虧最多的那檔（模擬券商處分）
+  const forced = new Set();
+  if (margin?.currentRatio != null && margin.forceSell && margin.currentRatio < (margin.maintenance || 1.3) * 100) {
+    const worst = held.filter((s) => positions[s].loan > 0 && analyses[s]?.price).sort((a, b) => (analyses[a].price / positions[a].avgCost) - (analyses[b].price / positions[b].avgCost))[0];
+    if (worst) {
+      const pnlPct = ((analyses[worst].price - positions[worst].avgCost) / positions[worst].avgCost) * 100;
+      decisions.push({ symbol: worst, action: "SELL", shares: positions[worst].shares, reason: `斷頭：整戶維持率 ${margin.currentRatio}% 低於 ${Math.round((margin.maintenance || 1.3) * 100)}%，處分虧損最大的融資持股（${pnlPct.toFixed(1)}%）`, score: analyses[worst].score, kind: "margincall" });
+      forced.add(worst);
+    }
+  }
 
   // 先處理持股：停損 / 停利 / 賣出訊號
   for (const sym of held) {
+    if (forced.has(sym)) continue;
     const a = analyses[sym];
     if (!a || a.price == null) continue;
     const pos = positions[sym];
@@ -62,15 +79,19 @@ export function decide({ analyses, positions, cash, totalEquity, risk = DEFAULT_
     if (room <= 0) { decisions.push({ symbol: sym, action: "HOLD", shares: 0, reason: `已達單一持股上限 (分數 ${a.score})`, score: a.score, kind: "cap" }); continue; }
     if (!pos && positionCount >= risk.maxPositions) { decisions.push({ symbol: sym, action: "HOLD", shares: 0, reason: "已達持股檔數上限", score: a.score, kind: "cap" }); continue; }
     if (lastBuyDays[sym] != null && lastBuyDays[sym] < risk.cooldownDays) { decisions.push({ symbol: sym, action: "HOLD", shares: 0, reason: `冷卻中：${lastBuyDays[sym]} 天前剛買進 (分數 ${a.score})`, score: a.score, kind: "cooldown" }); continue; }
-    const budget = Math.min(totalEquity * risk.perTradePct, room, cashLeft - minCash);
+    // 融資：同樣的曝險，現金只要付自備款（1 − 成數）
+    const ratio = useMargin ? margin.ratio?.[sym] || 0 : 0;
+    const cashRoom = cashLeft - minCash;
+    const budget = Math.min(totalEquity * risk.perTradePct, room, ratio ? cashRoom / (1 - ratio) : cashRoom);
     if (budget <= 0) { decisions.push({ symbol: sym, action: "HOLD", shares: 0, reason: `現金不足 (分數 ${a.score})`, score: a.score, kind: "cash" }); continue; }
     let shares = Math.floor(budget / (a.price * 1000)) * 1000;
-    if (shares === 0 && risk.oddLot) shares = Math.floor(budget / a.price);
+    let onMargin = ratio > 0 && shares > 0; // 融資只能整張；不足一張就退回現股零股
+    if (shares === 0 && risk.oddLot) shares = Math.floor(Math.min(budget, cashRoom) / a.price);
     if (shares <= 0 || shares * a.price < risk.minOrderAmount) { decisions.push({ symbol: sym, action: "HOLD", shares: 0, reason: `預算低於最小下單金額 (分數 ${a.score})`, score: a.score, kind: "cash" }); continue; }
-    const cost = shares * a.price * 1.001425;
+    const cost = shares * a.price * 1.001425 - (onMargin ? Math.floor((shares * a.price * ratio) / 1000) * 1000 : 0);
     cashLeft -= cost;
     if (!pos) positionCount++;
-    decisions.push({ symbol: sym, action: "BUY", shares, reason: `訊號偏多 (分數 ${a.score})：${a.reasons.slice(0, 3).join("；")}`, score: a.score, kind: "signal" });
+    decisions.push({ symbol: sym, action: "BUY", shares, margin: onMargin, reason: `訊號偏多 (分數 ${a.score})${onMargin ? `，融資 ${Math.round(ratio * 100)}%` : ""}：${a.reasons.slice(0, 3).join("；")}`, score: a.score, kind: "signal" });
   }
   // 未進入上述者
   for (const [sym, a] of Object.entries(analyses)) {

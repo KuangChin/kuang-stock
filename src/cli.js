@@ -11,7 +11,7 @@ if (cmd === "cycle") {
   // 第三個參數可以是天數，或 起日:迄日（例如 2025-01-01:2025-06-30，迄日可省略）
   const span = args[2] || "120";
   const [from, to] = span.includes("-") ? span.split(":") : [null, null];
-  const r = await runBacktest({ symbols, cash: Number(args[1] || 1000000), days: Number(span) || 120, from, to });
+  const r = await runBacktest({ symbols, cash: Number(args[1] || 1000000), days: Number(span) || 120, from, to, margin: args.includes("--margin") ? { enabled: true } : null });
   const { curve, tradeLog, ...summary } = r;
   console.log(JSON.stringify(summary, null, 1));
   console.log(tradeLog.slice(0, 15).map((t) => `${t.t} ${t.side} ${t.symbol} ${t.shares}@${t.price} realized=${t.realized} ${t.reason}`).join("\n"));

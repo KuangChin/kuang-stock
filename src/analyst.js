@@ -46,7 +46,10 @@ function buildPrompt(snapshot) {
   const g = snapshot.global || {};
   const gl = Object.values(g).filter((x) => x?.price != null).map((x) => `${x.label} ${x.price}（${x.changePct > 0 ? "+" : ""}${x.changePct}%${x.session && x.session !== "futures" ? "，" + { pre: "盤前", post: "盤後", regular: "盤中", closed: "收盤" }[x.session] : ""}${x.ret5 != null ? "，5日 " + (x.ret5 > 0 ? "+" : "") + x.ret5 + "%" : ""}）`).join("；");
   if (gl) lines.push(`國際市場：${gl}。`);
-  lines.push(`\n帳戶：現金 ${snapshot.valuation.cash}，持股市值 ${snapshot.valuation.marketValue}，總資產 ${snapshot.valuation.total}，累積報酬 ${snapshot.valuation.returnPct}%。`);
+  const sv = snapshot.valuation;
+  lines.push(`\n帳戶：現金 ${sv.cash}，持股市值 ${sv.marketValue}，${sv.loan ? `融資餘額 ${sv.loan}（未付利息 ${sv.interest}，整戶維持率 ${sv.maintenance}%，追繳線 ${sv.maintenanceLine}%${sv.marginCall ? "，已低於追繳線" : ""}），` : ""}總資產 ${sv.total}（已扣融資），累積報酬 ${sv.returnPct}%。`);
+  const mg = snapshot.margin;
+  if (mg?.enabled) lines.push(`融資模式：開（上市 ${Math.round(mg.ratioTse * 100)}%／上櫃 ${Math.round(mg.ratioOtc * 100)}% 成數，年利率 ${(mg.interestRate * 100).toFixed(2)}%，維持率 ${Math.round(mg.maintenance * 100)}% 以下${mg.forceSell === false ? "只警示" : "自動斷頭"}）。買進以融資整張為主，現金只付自備款；槓桿會放大虧損，建議 size_pct 保守。`);
   const rk = snapshot.risk || {};
   const P = (v) => (v == null ? "--" : Math.round(v * 1000) / 10);
   lines.push(`風控參數（帳戶主人設定，請照此執行，不要自行建議或引用其他停損／停利比例）：停損 ${P(rk.stopLossPct)}%（持股虧損達此比例才強制賣出）、停利 ${P(rk.takeProfitPct)}%（獲利達此比例減半）、單一持股上限 ${P(rk.maxPositionPct)}%、每筆買進 ${P(rk.perTradePct)}%、保留現金 ${P(rk.minCashPct)}%（這是現金比例，不是停損）、買進門檻 ${rk.buyThreshold}、賣出門檻 ${rk.sellThreshold}、最多 ${rk.maxPositions} 檔、冷卻 ${rk.cooldownDays} 天。`);

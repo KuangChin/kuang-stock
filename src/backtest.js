@@ -4,7 +4,8 @@ import { computeIndicators } from "./indicators.js";
 import { decide, DEFAULT_RISK } from "./strategy.js";
 import { combine } from "./analysts/index.js";
 import * as technical from "./analysts/technical.js";
-import { executeOrder, valuation } from "./portfolio.js";
+import { executeOrder, valuation, accrueInterest, marginRatio, DEFAULT_MARGIN } from "./portfolio.js";
+import { getListing } from "./twse.js";
 
 const WARM = 65; // 指標暖機需要的交易日數
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -56,9 +57,12 @@ export function normalizeRange({ from, to } = {}) {
  * 回測時間段兩種給法：days（最近 N 個交易日，預設）或 from/to（指定起迄日期，含暖機自動往前抓資料）。
  * maxDays 是雲端上限：不論哪種給法，最多只跑這麼多個交易日（從 to 往前算）。
  */
-export async function runBacktest({ symbols, cash = 1000000, days = 120, from = null, to = null, maxDays = null, risk = {}, fees, benchmark = "0050", months = 12, histories = null }) {
+export async function runBacktest({ symbols, cash = 1000000, days = 120, from = null, to = null, maxDays = null, risk = {}, fees, benchmark = "0050", months = 12, histories = null, margin = null }) {
   symbols = [...new Set(symbols.map(String))];
   risk = { ...DEFAULT_RISK, ...risk };
+  const mcfg = { ...DEFAULT_MARGIN, ...(margin || {}) };
+  const mratio = {};
+  if (mcfg.enabled) { const listing = await getListing().catch(() => ({})); for (const s of symbols) mratio[s] = marginRatio(listing[s]?.market || "tse", mcfg); }
   ({ from, to } = normalizeRange({ from, to }));
   if (!histories) histories = await loadHistories([...symbols, benchmark], from ? { from, to } : { months: to ? Math.ceil((days + WARM) / 21) + 1 : months, to });
   let dates = [...new Set(Object.values(histories).flat().map((b) => b.date))].sort();
@@ -69,12 +73,12 @@ export async function runBacktest({ symbols, cash = 1000000, days = 120, from = 
   if (maxDays) startIdx = Math.max(startIdx, dates.length - maxDays);
   if (startIdx >= dates.length) return { symbols, days: 0, start: null, end: null, from, to, initialCash: cash, finalEquity: cash, returnPct: 0, benchmarkReturnPct: null, benchmark, maxDrawdownPct: 0, trades: 0, sells: 0, winRate: null, realized: 0, curve: [], tradeLog: [], positions: {}, error: "指定時間段內沒有足夠的歷史資料（需要 65 個交易日暖機）" };
   const state = {
-    config: { initialCash: cash, fees: { commission: 0.001425, minFee: 20, tax: 0.003, discount: 0.6, ...(fees || {}) }, risk },
+    config: { initialCash: cash, fees: { commission: 0.001425, minFee: 20, tax: 0.003, discount: 0.6, ...(fees || {}) }, risk, margin: mcfg },
     cash, positions: {}, trades: [], equity: [],
   };
   const byDate = {};
   for (const s of Object.keys(histories)) { byDate[s] = {}; histories[s].forEach((b, i) => (byDate[s][b.date] = i)); }
-  let pending = [];
+  let pending = [], marginCalls = 0;
   const curve = [];
   const bench0 = histories[benchmark]?.find((b) => b.date >= dates[startIdx])?.close;
   for (let di = startIdx; di < dates.length; di++) {
@@ -83,10 +87,11 @@ export async function runBacktest({ symbols, cash = 1000000, days = 120, from = 
     for (const d of pending) {
       const bi = byDate[d.symbol][date]; if (bi == null) continue;
       const bar = histories[d.symbol][bi];
-      const r = executeOrder(state, { symbol: d.symbol, side: d.action, shares: d.shares, price: bar.open, reason: d.reason, source: "backtest" });
+      const r = executeOrder(state, { symbol: d.symbol, side: d.action, shares: d.shares, price: bar.open, reason: d.reason, source: "backtest", margin: Boolean(d.margin), ratio: mratio[d.symbol] || 0, at: date });
       if (r.trade) r.trade.t = date;
     }
     pending = [];
+    accrueInterest(state, date);
     // 2. 用今日收盤算指標與決策
     const analyses = {}, quotes = {};
     for (const s of symbols) {
@@ -102,10 +107,11 @@ export async function runBacktest({ symbols, cash = 1000000, days = 120, from = 
     const val = valuation(state, quotes);
     const lastBuyDays = {};
     for (const t of state.trades) if (t.side === "BUY" && lastBuyDays[t.symbol] == null) lastBuyDays[t.symbol] = Math.round((new Date(date) - new Date(t.t)) / 86400e3);
-    const decisions = decide({ analyses, positions: state.positions, cash: state.cash, totalEquity: val.total, risk, lastBuyDays });
+    if (val.marginCall) marginCalls++;
+    const decisions = decide({ analyses, positions: state.positions, cash: state.cash, totalEquity: val.total, risk, lastBuyDays, margin: { enabled: mcfg.enabled, ratio: mratio, maintenance: mcfg.maintenance, forceSell: mcfg.forceSell !== false, currentRatio: val.maintenance } });
     pending = decisions.filter((d) => d.action !== "HOLD" && d.shares > 0);
     const bb = histories[benchmark]?.[byDate[benchmark][date]];
-    curve.push({ date, total: val.total, cash: val.cash, benchmark: bb && bench0 ? +((bb.close / bench0) * cash).toFixed(0) : null });
+    curve.push({ date, total: val.total, cash: val.cash, loan: val.loan || 0, benchmark: bb && bench0 ? +((bb.close / bench0) * cash).toFixed(0) : null });
   }
   // 統計
   let peak = -Infinity, maxDD = 0;
@@ -121,6 +127,7 @@ export async function runBacktest({ symbols, cash = 1000000, days = 120, from = 
     benchmarkReturnPct: benchFinal ? +(((benchFinal - cash) / cash) * 100).toFixed(2) : null, benchmark,
     maxDrawdownPct: +(maxDD * 100).toFixed(2), trades: state.trades.length, sells: sells.length, winRate: sells.length ? +((wins / sells.length) * 100).toFixed(1) : null,
     realized: Math.round(state.trades.reduce((s, t) => s + (t.realized || 0), 0)),
+    margin: mcfg.enabled ? { enabled: true, marginCallDays: marginCalls, forcedSells: state.trades.filter((t) => /^斷頭/.test(t.reason || "")).length, interestPaid: Math.round(state.trades.reduce((s, t) => s + (t.interest || 0), 0)), maxLoan: Math.max(0, ...curve.map((p) => p.loan)) } : null,
     curve, tradeLog: [...state.trades].reverse(), positions: state.positions,
   };
 }

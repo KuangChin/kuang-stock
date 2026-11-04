@@ -9,7 +9,7 @@ import { decide } from "./strategy.js";
 import { analyzeSymbol } from "./analysts/index.js";
 import { analyzeMarket } from "./analysts/macro.js";
 import { buildSummary } from "./summary.js";
-import { executeOrder, valuation } from "./portfolio.js";
+import { executeOrder, valuation, accrueInterest, marginRatio } from "./portfolio.js";
 import { getState, saveState, addLog } from "./store.js";
 import { aiAvailable, aiDecide, writeSnapshot, readExternalDecisions } from "./analyst.js";
 import { storage } from "./storage.js";
@@ -66,6 +66,17 @@ export async function analyzeSymbols(symbols, { withNews = true, advisorsCached 
   return { quotes, indices, global, taifex, macro, analyses, macroNews: news.macro, macroSentiment: macroSent.score, advisors };
 }
 
+/** 融資計畫：每檔的成數（上市／上櫃）、追繳門檻與目前整戶維持率，交給 decide 與 executeOrder */
+export async function marginPlan(state, symbols, val) {
+  const cfg = state.config.margin || {};
+  const ratio = {};
+  if (cfg.enabled) {
+    const listing = await getListing().catch(() => ({}));
+    for (const s of symbols) ratio[s] = marginRatio(listing[s]?.market || "tse", cfg);
+  }
+  return { enabled: Boolean(cfg.enabled), ratio, maintenance: cfg.maintenance, forceSell: cfg.forceSell !== false, currentRatio: val.maintenance };
+}
+
 /**
  * 執行一輪。execute=true 才真的模擬成交；否則只產生建議。
  */
@@ -78,16 +89,20 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
     const marketOpen = isMarketOpen();
     addLog(`開始分析 ${symbols.length} 檔（${marketOpen ? "盤中" : "盤後"}，來源 ${source}）`);
     const { quotes, indices, global, taifex, macro, analyses, macroNews, macroSentiment, advisors } = await analyzeSymbols(symbols);
+    const interest = accrueInterest(state);
+    if (interest) addLog(`融資利息累計 ${interest} 元`);
     const val = valuation(state, quotes);
     const lastBuyDays = {};
     for (const t of state.trades) if (t.side === "BUY" && lastBuyDays[t.symbol] == null) lastBuyDays[t.symbol] = Math.floor((Date.now() - new Date(t.t)) / 86400e3);
-    const ruleDecisions = decide({ analyses, positions: state.positions, cash: state.cash, totalEquity: val.total, risk: state.config.risk, lastBuyDays });
+    const margin = await marginPlan(state, symbols, val);
+    if (val.marginCall) addLog(`融資追繳：整戶維持率 ${val.maintenance}% 低於 ${val.maintenanceLine}%`, "warn");
+    const ruleDecisions = decide({ analyses, positions: state.positions, cash: state.cash, totalEquity: val.total, risk: state.config.risk, lastBuyDays, margin });
     for (const d of ruleDecisions) if (analyses[d.symbol]) analyses[d.symbol].ruleDecision = d;
 
     // --- AI 分析師 ---
     let ai = null, aiError = null;
     const snapshot = {
-      time: taipeiNow(), marketOpen, indices, global, taifex, macro, macroSentiment, macroNews, advisors, valuation: val, risk: state.config.risk, weights: state.config.weights,
+      time: taipeiNow(), marketOpen, indices, global, taifex, macro, macroSentiment, macroNews, advisors, valuation: val, risk: state.config.risk, margin: state.config.margin, weights: state.config.weights,
       analyses: Object.values(analyses).map(({ series, quote, ...rest }) => rest),
     };
     await writeSnapshot(snapshot).catch(() => {});
@@ -110,12 +125,15 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
       for (const d of ai.decisions) {
         const a = analyses[d.symbol]; if (!a || !a.price) continue;
         const rule = byRule[d.symbol];
-        if (rule?.kind === "stop") { finalDecisions.push({ ...rule, reason: rule.reason + "（規則強制）" }); continue; }
+        if (rule?.kind === "stop" || rule?.kind === "margincall") { finalDecisions.push({ ...rule, reason: rule.reason + "（規則強制）" }); continue; }
         if (d.action === "BUY") {
-          const budget = Math.min(state.cash * (d.size_pct / 100), val.total * state.config.risk.maxPositionPct - (state.positions[d.symbol]?.shares || 0) * a.price);
+          const ratio = margin.enabled ? margin.ratio[d.symbol] || 0 : 0;
+          const cashPart = state.cash * (d.size_pct / 100);
+          const budget = Math.min(ratio ? cashPart / (1 - ratio) : cashPart, val.total * state.config.risk.maxPositionPct - (state.positions[d.symbol]?.shares || 0) * a.price);
           let shares = Math.floor(budget / (a.price * 1000)) * 1000;
-          if (shares === 0 && state.config.risk.oddLot) shares = Math.floor(budget / a.price);
-          finalDecisions.push({ symbol: d.symbol, action: shares > 0 ? "BUY" : "HOLD", shares: Math.max(shares, 0), reason: `AI：${d.reason} (信心 ${d.confidence})`, score: a.score, kind: "ai", confidence: d.confidence });
+          const onMargin = ratio > 0 && shares > 0;
+          if (shares === 0 && state.config.risk.oddLot) shares = Math.floor(cashPart / a.price);
+          finalDecisions.push({ symbol: d.symbol, action: shares > 0 ? "BUY" : "HOLD", shares: Math.max(shares, 0), margin: onMargin, reason: `AI：${d.reason} (信心 ${d.confidence})${onMargin ? `，融資 ${Math.round(ratio * 100)}%` : ""}`, score: a.score, kind: "ai", confidence: d.confidence });
         } else if (d.action === "SELL") {
           const held = state.positions[d.symbol]?.shares || 0;
           const shares = Math.floor(held * (d.size_pct / 100));
@@ -133,7 +151,7 @@ export async function runCycle({ execute = false, source = "manual" } = {}) {
         const a = analyses[d.symbol];
         const q = a.quote;
         const price = d.action === "BUY" ? q?.bestAsk || a.price : q?.bestBid || a.price;
-        const r = executeOrder(state, { symbol: d.symbol, side: d.action, shares: d.shares, price, name: a.name, reason: d.reason, source: ai ? "ai" : "rule" });
+        const r = executeOrder(state, { symbol: d.symbol, side: d.action, shares: d.shares, price, name: a.name, reason: d.reason, source: ai ? "ai" : "rule", margin: Boolean(d.margin), ratio: margin.ratio[d.symbol] || 0 });
         if (r.error) { addLog(`${d.symbol} ${d.action} 失敗：${r.error}`, "warn"); d.result = r.error; }
         else { executed.push(r.trade); d.result = "成交"; addLog(`${d.action} ${d.symbol} ${a.name} ${d.shares} 股 @ ${price}：${d.reason}`); }
       }

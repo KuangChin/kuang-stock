@@ -4,8 +4,8 @@ import { loadState, getState, saveState, resetState, addLog, runWithState, enter
 import { runCycle, symbolDetail, autoTick } from "./engine.js";
 import { runBacktest, normalizeRange } from "./backtest.js";
 import { tuneRisk } from "./tuner.js";
-import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow } from "./twse.js";
-import { executeOrder, valuation } from "./portfolio.js";
+import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow, getListing } from "./twse.js";
+import { executeOrder, valuation, marginRatio } from "./portfolio.js";
 import { aiAvailable } from "./analyst.js";
 import { chatStream, CHAT_MAX } from "./chat.js";
 import { getTaifex } from "./taifex.js";
@@ -62,6 +62,7 @@ export const routes = {
     const s = getState();
     const c = s.config;
     if (body.risk) c.risk = { ...c.risk, ...body.risk };
+    if (body.margin) c.margin = { ...c.margin, ...body.margin };
     if (body.weights) c.weights = { ...c.weights, ...body.weights };
     if (body.auto) c.auto = { ...c.auto, ...body.auto };
     if (body.ai) c.ai = { ...c.ai, ...body.ai };
@@ -77,9 +78,11 @@ export const routes = {
     const q = (await getQuotes([body.symbol]))[body.symbol];
     const price = body.price || (body.side === "BUY" ? q?.bestAsk : q?.bestBid) || q?.price;
     if (!price) throw new HttpError(400, "取不到報價");
-    const r = executeOrder(s, { symbol: body.symbol, side: body.side, shares: body.shares, price, name: q?.name, reason: body.reason || "手動下單", source: "manual" });
+    const useMargin = body.side === "BUY" && Boolean(body.margin);
+    const ratio = useMargin ? marginRatio((await getListing().catch(() => ({})))[body.symbol]?.market || "tse", s.config.margin) : 0;
+    const r = executeOrder(s, { symbol: body.symbol, side: body.side, shares: body.shares, price, name: q?.name, reason: body.reason || (useMargin ? "手動融資買進" : "手動下單"), source: "manual", margin: useMargin, ratio });
     if (r.error) throw new HttpError(400, r.error);
-    addLog(`手動 ${body.side} ${body.symbol} ${body.shares} 股 @ ${price}`);
+    addLog(`手動 ${body.side} ${body.symbol} ${body.shares} 股 @ ${price}${r.trade.loan ? `（融資 ${r.trade.loan}）` : ""}`);
     await saveState(["cash", "positions", "trades", "log"]);
     return { trade: r.trade, state: publicState() };
   },
@@ -113,7 +116,7 @@ export const routes = {
     const s = getState();
     const symbols = body.symbols?.length ? body.symbols : [...new Set([...Object.keys(s.positions), ...s.config.watchlist])];
     const trials = isServerless ? Math.min(body.trials || CLOUD_LIMITS.tuneTrials, CLOUD_LIMITS.tuneTrials) : body.trials || 40;
-    const r = await tuneRisk({ symbols: isServerless ? symbols.slice(0, CLOUD_LIMITS.backtestSymbols) : symbols, cash: s.initialEquity || s.config.initialCash, days: Math.min(body.days || 120, isServerless ? CLOUD_LIMITS.backtestDays : 9999), baseRisk: s.config.risk, fees: s.config.fees, trials });
+    const r = await tuneRisk({ symbols: isServerless ? symbols.slice(0, CLOUD_LIMITS.backtestSymbols) : symbols, cash: s.initialEquity || s.config.initialCash, days: Math.min(body.days || 120, isServerless ? CLOUD_LIMITS.backtestDays : 9999), baseRisk: s.config.risk, fees: s.config.fees, margin: s.config.margin, trials });
     if (body.apply !== false) {
       const keep = { oddLot: s.config.risk.oddLot, minCashPct: s.config.risk.minCashPct, minOrderAmount: s.config.risk.minOrderAmount, maxPositions: s.config.risk.maxPositions, lockStopLoss: s.config.risk.lockStopLoss };
       if (s.config.risk.lockStopLoss) keep.stopLossPct = s.config.risk.stopLossPct; // 投資長鎖定的停損不被調參改掉

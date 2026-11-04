@@ -1,4 +1,5 @@
 import { DEFAULT_RISK } from "./strategy.js";
+import { DEFAULT_MARGIN } from "./portfolio.js";
 import { DEFAULT_WEIGHTS } from "./analysts/index.js";
 import { storage } from "./storage.js";
 
@@ -12,6 +13,7 @@ export function defaultState() {
       initialCash: 1000000,
       fees: { commission: 0.001425, minFee: 20, tax: 0.003, discount: 0.6 },
       risk: { ...DEFAULT_RISK },
+      margin: { ...DEFAULT_MARGIN }, // 融資：成數、利率、維持率
       weights: { ...DEFAULT_WEIGHTS },
       auto: { enabled: false, intervalMin: 5, executeOnClose: true },
       watchlist: ["2330", "2317", "2454", "0050", "2603", "2881"],
@@ -40,7 +42,7 @@ const current = () => als.getStore()?.state ?? moduleState;
 export function mergeDefaults(loaded) {
   const d = defaultState();
   const c = loaded.config || {};
-  loaded.config = { ...d.config, ...c, fees: { ...d.config.fees, ...c.fees }, risk: { ...d.config.risk, ...c.risk }, weights: { ...d.config.weights, ...c.weights }, auto: { ...d.config.auto, ...c.auto }, ai: { ...d.config.ai, ...c.ai } };
+  loaded.config = { ...d.config, ...c, fees: { ...d.config.fees, ...c.fees }, risk: { ...d.config.risk, ...c.risk }, margin: { ...d.config.margin, ...c.margin }, weights: { ...d.config.weights, ...c.weights }, auto: { ...d.config.auto, ...c.auto }, ai: { ...d.config.ai, ...c.ai } };
   return loaded;
 }
 
@@ -91,12 +93,12 @@ export async function resetState(partial = {}) {
   if (partial.positions) {
     for (const p of partial.positions) {
       if (!p.symbol || !p.shares) continue;
-      next.positions[String(p.symbol)] = { shares: Number(p.shares), avgCost: Number(p.avgCost || 0), name: p.name || "" };
+      next.positions[String(p.symbol)] = { shares: Number(p.shares), avgCost: Number(p.avgCost || 0), name: p.name || "", ...(p.loan > 0 ? { loan: Math.round(Number(p.loan)), interest: 0, interestAt: Date.now() } : {}) };
       costBasis += Number(p.shares) * Number(p.avgCost || 0);
     }
   }
   // 報酬基準 = 起始現金 + 原始持股成本
-  next.initialEquity = next.cash + costBasis;
+  next.initialEquity = next.cash + costBasis - Object.values(next.positions).reduce((t, p) => t + (p.loan || 0), 0);
   // 就地覆蓋，讓這個請求（與本機的排程）手上的參考都看到新內容
   if (st) { for (const k of Object.keys(st)) delete st[k]; Object.assign(st, next); } else moduleState = next;
   await saveState();

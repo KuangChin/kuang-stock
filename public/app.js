@@ -50,7 +50,7 @@ function render() {
   // KPI
   const idx = LIVE?.indices?.taiex || lc?.indices?.taiex;
   $("#kpis").innerHTML = v
-    ? tile("總資產", fmt(v.total), `累積報酬 ${sign(v.returnPct, 2, "%")}`, cls(v.returnPct)) + tile("現金", fmt(v.cash), `占 ${fmt((v.cash / v.total) * 100, 1)}%`) + tile("持股市值", fmt(v.marketValue), `${Object.keys(S.positions).length} 檔`) + tile("未實現損益", sign(v.unrealized), "", cls(v.unrealized)) + tile("今日損益", sign(v.dayPnl), "", cls(v.dayPnl)) + tile("已實現損益", sign(v.realized), `${S.trades.length} 筆交易`, cls(v.realized)) + (idx ? tile("加權指數", fmt(idx.price), `${sign(idx.change)} (${sign(idx.changePct, 2, "%")})`, cls(idx.change)) : "")
+    ? tile("總資產", fmt(v.total), `累積報酬 ${sign(v.returnPct, 2, "%")}${v.loan ? "，已扣融資" : ""}`, cls(v.returnPct)) + tile("現金", fmt(v.cash), `占 ${fmt((v.cash / v.total) * 100, 1)}%`) + tile("持股市值", fmt(v.marketValue), `${Object.keys(S.positions).length} 檔`) + (v.loan ? tile("融資餘額", fmt(v.loan), `未付利息 ${fmt(v.interest)}`) + tile("整戶維持率", fmt(v.maintenance, 1) + "%", v.marginCall ? `低於追繳線 ${v.maintenanceLine}%` : `追繳線 ${v.maintenanceLine}%`, v.marginCall ? "alert" : v.maintenance < v.maintenanceLine + 20 ? "caution" : "") : "") + tile("未實現損益", sign(v.unrealized), "", cls(v.unrealized)) + tile("今日損益", sign(v.dayPnl), "", cls(v.dayPnl)) + tile("已實現損益", sign(v.realized), `${S.trades.length} 筆交易`, cls(v.realized)) + (idx ? tile("加權指數", fmt(idx.price), `${sign(idx.change)} (${sign(idx.changePct, 2, "%")})`, cls(idx.change)) : "")
     : tile("總資產", fmt(S.cash), "尚未執行分析") + tile("現金", fmt(S.cash)) + tile("持股", Object.keys(S.positions).length + " 檔");
 
   // 資產曲線
@@ -62,7 +62,7 @@ function render() {
   // 持股
   const dec = Object.fromEntries((lc?.decisions || []).map((d) => [d.symbol, d]));
   const rows = v?.rows || Object.entries(S.positions).map(([symbol, p]) => ({ symbol, name: p.name, shares: p.shares, avgCost: p.avgCost, price: p.lastPrice, marketValue: null, pnl: null, pnlPct: null }));
-  $("#posTable tbody").innerHTML = rows.length ? rows.map((r) => `<tr class="clickable" data-sym="${r.symbol}"><td>${r.symbol}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.shares)}</td><td class="num">${fmt(r.avgCost, 2)}</td><td class="num">${fmt(r.price, 2)}</td><td class="num ${cls(r.changePct)}">${sign(r.changePct, 2, "%")}</td><td class="num">${fmt(r.marketValue)}</td><td class="num ${cls(r.pnl)}">${sign(r.pnl)}</td><td class="num ${cls(r.pnlPct)}">${sign(r.pnlPct, 2, "%")}</td><td>${dec[r.symbol] ? pill(dec[r.symbol].action) + ` <span class="muted small">${fmt(dec[r.symbol].score, 1)}</span>` : ""}</td></tr>`).join("") : '<tr><td colspan="10" class="muted">沒有持股。到「設定」輸入持股與現金。</td></tr>';
+  $("#posTable tbody").innerHTML = rows.length ? rows.map((r) => `<tr class="clickable" data-sym="${r.symbol}"><td>${r.symbol}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.shares)}</td><td class="num">${fmt(r.avgCost, 2)}</td><td class="num">${fmt(r.price, 2)}</td><td class="num ${cls(r.changePct)}">${sign(r.changePct, 2, "%")}</td><td class="num">${fmt(r.marketValue)}</td><td class="num ${cls(r.pnl)}">${sign(r.pnl)}</td><td class="num ${cls(r.pnlPct)}">${sign(r.pnlPct, 2, "%")}</td><td class="num ${r.maintenance != null && r.maintenance < (v.maintenanceLine || 130) ? "alert" : ""}">${r.loan ? `${fmt(r.loan)}<span class="muted small"> 維持率 ${fmt(r.maintenance, 0)}%</span>` : '<span class="muted">現股</span>'}</td><td>${dec[r.symbol] ? pill(dec[r.symbol].action) + ` <span class="muted small">${fmt(dec[r.symbol].score, 1)}</span>` : ""}</td></tr>`).join("") : '<tr><td colspan="11" class="muted">沒有持股。到「設定」輸入持股與現金。</td></tr>';
   $("#posNote").textContent = LIVE?.valuation ? `即時報價 ${String(LIVE.t).replace(/^\S+ /, "").slice(0, 5)}，每分鐘更新` : v ? `分析快照 ${lc.tTaipei}` : "";
 
   // 決策
@@ -138,18 +138,18 @@ async function openDetail(sym) {
     $("#dInd").innerHTML = pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
     $("#dReasons").innerHTML = (a.reasons || []).map((r) => `<li>· ${esc(r)}</li>`).join("") || "<li class='muted'>--</li>";
     $("#dNews").innerHTML = (a.news || []).map(newsLi).join("") || "<li class='muted'>沒有找到新聞</li>";
-    const f = $("#orderForm"); f.dataset.sym = sym; const held = S.positions[sym]?.shares || 0; f.shares.value = held && held < 1000 ? held : 1000;
+    const f = $("#orderForm"); f.dataset.sym = sym; const held = S.positions[sym]?.shares || 0; f.shares.value = held && held < 1000 ? held : 1000; f.margin.checked = !!S.config.margin?.enabled;
   } catch (e) { $("#dTitle").textContent = "載入失敗：" + e.message; }
   finally { $("#dBody").style.opacity = 1; }
 }
 $("#orderForm").onsubmit = async (e) => {
   e.preventDefault(); const f = e.target;
-  try { const r = await api("/api/order", { symbol: f.dataset.sym, side: f.side.value, shares: Number(f.shares.value) }); toast(`成交：${r.trade.side} ${r.trade.symbol} ${r.trade.shares} 股 @ ${r.trade.price}`); await refresh(); }
+  try { const r = await api("/api/order", { symbol: f.dataset.sym, side: f.side.value, shares: Number(f.shares.value), margin: f.margin.checked }); toast(`成交：${r.trade.side} ${r.trade.symbol} ${r.trade.shares} 股 @ ${r.trade.price}${r.trade.loan ? `，融資 ${fmt(r.trade.loan)}` : ""}`); await refresh(); }
   catch (err) { toast("下單失敗：" + err.message, 5000); }
 };
 
 // ---------- 設定 ----------
-function posRow(p = {}) { return `<tr><td><input name="psym" value="${esc(p.symbol || "")}" placeholder="2330" size="6"></td><td><input name="pshares" type="number" value="${p.shares || ""}" placeholder="1000"></td><td><input name="pcost" type="number" step="0.01" value="${p.avgCost ? (+p.avgCost).toFixed(2) : ""}" placeholder="成本/股"></td><td><button type="button" class="btn ghost" data-del>✕</button></td></tr>`; }
+function posRow(p = {}) { return `<tr><td><input name="psym" value="${esc(p.symbol || "")}" placeholder="2330" size="6"></td><td><input name="pshares" type="number" value="${p.shares || ""}" placeholder="1000"></td><td><input name="pcost" type="number" step="0.01" value="${p.avgCost ? (+p.avgCost).toFixed(2) : ""}" placeholder="成本/股"></td><td><input name="ploan" type="number" step="1000" min="0" value="${p.loan || ""}" placeholder="0 = 現股"></td><td><button type="button" class="btn ghost" data-del>✕</button></td></tr>`; }
 function openSettings() {
   const f = $("#setupForm"), c = S.config, r = c.risk;
   f.cash.value = Math.round(S.cash);
@@ -158,6 +158,8 @@ function openSettings() {
   for (const k of ["maxPositionPct", "perTradePct", "stopLossPct", "takeProfitPct", "minCashPct"]) f[k].value = +(r[k] * 100).toFixed(2);
   for (const k of ["buyThreshold", "sellThreshold", "maxPositions", "cooldownDays", "minOrderAmount"]) f[k].value = r[k];
   f.oddLot.checked = !!r.oddLot;
+  const m = c.margin || {};
+  f.marginEnabled.checked = !!m.enabled; f.marginTse.value = Math.round((m.ratioTse ?? 0.6) * 100); f.marginOtc.value = Math.round((m.ratioOtc ?? 0.5) * 100); f.marginRate.value = +((m.interestRate ?? 0.065) * 100).toFixed(2); f.marginMaint.value = Math.round((m.maintenance ?? 1.3) * 100); f.marginForce.checked = m.forceSell !== false;
   for (const k of ANALYST_ORDER) f["w_" + k].value = Math.round((c.weights?.[k] ?? 0) * 100);
   f.autoEnabled.checked = !!c.auto.enabled; f.intervalMin.value = c.auto.intervalMin; f.executeOnClose.checked = !!c.auto.executeOnClose;
   f.aiEnabled.checked = !!c.ai.enabled; f.aiModel.value = c.ai.model; f.aiEffort.value = c.ai.effort;
@@ -186,7 +188,7 @@ $("#addPosRow").onclick = () => $("#posEdit tbody").insertAdjacentHTML("beforeen
 $("#posEdit").onclick = (e) => { if (e.target.dataset.del != null) e.target.closest("tr").remove(); };
 $("#btnReset").onclick = async () => {
   const f = $("#setupForm");
-  const positions = $$("#posEdit tbody tr").map((tr) => ({ symbol: tr.querySelector("[name=psym]").value.trim(), shares: Number(tr.querySelector("[name=pshares]").value), avgCost: Number(tr.querySelector("[name=pcost]").value) })).filter((p) => p.symbol && p.shares > 0);
+  const positions = $$("#posEdit tbody tr").map((tr) => ({ symbol: tr.querySelector("[name=psym]").value.trim(), shares: Number(tr.querySelector("[name=pshares]").value), avgCost: Number(tr.querySelector("[name=pcost]").value), loan: Number(tr.querySelector("[name=ploan]").value) || 0 })).filter((p) => p.symbol && p.shares > 0);
   if (!confirm(`將以現金 ${fmt(f.cash.value)} 與 ${positions.length} 檔持股重設帳戶，並清空交易紀錄與資產曲線。確定？`)) return;
   try { S = await api("/api/portfolio/reset", { cash: Number(f.cash.value), positions }); await saveSettings(); toast("帳戶已重設"); render(); }
   catch (e) { toast("重設失敗：" + e.message, 5000); }
@@ -196,7 +198,7 @@ async function saveSettings() {
   const pct = (k) => Number(f[k].value) / 100;
   const wsum = ANALYST_ORDER.reduce((t, k) => t + Number(f["w_" + k].value || 0), 0) || 1;
   const weights = Object.fromEntries(ANALYST_ORDER.map((k) => [k, Number(f["w_" + k].value || 0) / wsum]));
-  const body = { watchlist: watch, weights, risk: { maxPositionPct: pct("maxPositionPct"), perTradePct: pct("perTradePct"), stopLossPct: pct("stopLossPct"), takeProfitPct: pct("takeProfitPct"), minCashPct: pct("minCashPct"), buyThreshold: Number(f.buyThreshold.value), sellThreshold: Number(f.sellThreshold.value), maxPositions: Number(f.maxPositions.value), cooldownDays: Number(f.cooldownDays.value), minOrderAmount: Number(f.minOrderAmount.value), oddLot: f.oddLot.checked }, auto: { enabled: f.autoEnabled.checked, intervalMin: Number(f.intervalMin.value), executeOnClose: f.executeOnClose.checked }, ai: { enabled: f.aiEnabled.checked, model: f.aiModel.value.trim(), effort: f.aiEffort.value } };
+  const body = { watchlist: watch, weights, risk: { maxPositionPct: pct("maxPositionPct"), perTradePct: pct("perTradePct"), stopLossPct: pct("stopLossPct"), takeProfitPct: pct("takeProfitPct"), minCashPct: pct("minCashPct"), buyThreshold: Number(f.buyThreshold.value), sellThreshold: Number(f.sellThreshold.value), maxPositions: Number(f.maxPositions.value), cooldownDays: Number(f.cooldownDays.value), minOrderAmount: Number(f.minOrderAmount.value), oddLot: f.oddLot.checked }, margin: { enabled: f.marginEnabled.checked, ratioTse: pct("marginTse"), ratioOtc: pct("marginOtc"), interestRate: +(Number(f.marginRate.value) / 100).toFixed(4), maintenance: pct("marginMaint"), forceSell: f.marginForce.checked }, auto: { enabled: f.autoEnabled.checked, intervalMin: Number(f.intervalMin.value), executeOnClose: f.executeOnClose.checked }, ai: { enabled: f.aiEnabled.checked, model: f.aiModel.value.trim(), effort: f.aiEffort.value } };
   S = await api("/api/config", body);
 }
 $("#setupForm").onsubmit = async (e) => { e.preventDefault(); try { await saveSettings(); toast("設定已儲存"); $("#settings").classList.add("hidden"); render(); } catch (err) { toast("儲存失敗：" + err.message, 5000); } };
@@ -205,11 +207,11 @@ $("#setupForm").onsubmit = async (e) => { e.preventDefault(); try { await saveSe
 $("#btForm").onsubmit = async (e) => {
   e.preventDefault(); const f = e.target; const btn = f.querySelector("button"); btn.disabled = true; toast("回測中（首次需下載歷史資料，約需 10-60 秒）…", 10000);
   try {
-    const r = await api("/api/backtest", { symbols: f.symbols.value.split(/[,，\s]+/).filter(Boolean), cash: Number(f.cash.value), days: Number(f.days.value), from: f.from.value || null, to: f.to.value || null, risk: S.config.risk, fees: S.config.fees });
+    const r = await api("/api/backtest", { symbols: f.symbols.value.split(/[,，\s]+/).filter(Boolean), cash: Number(f.cash.value), days: Number(f.days.value), from: f.from.value || null, to: f.to.value || null, risk: S.config.risk, fees: S.config.fees, margin: S.config.margin });
     if (r.error) throw new Error(r.error);
     $("#btChart").classList.remove("hidden"); $("#btTrades").classList.remove("hidden");
     if (r.truncated) toast(`雲端最多 250 個交易日，實際從 ${r.start} 起算`, 6000);
-    $("#btStats").innerHTML = tile("期末資產", fmt(r.finalEquity), `${r.start} ～ ${r.end}`) + tile("策略報酬", sign(r.returnPct, 2, "%"), "", cls(r.returnPct)) + tile(`${r.benchmark} 同期`, sign(r.benchmarkReturnPct, 2, "%"), "買進持有", cls(r.benchmarkReturnPct)) + tile("最大回撤", "-" + fmt(r.maxDrawdownPct, 2) + "%", "", "down") + tile("交易次數", r.trades, `賣出 ${r.sells} 筆，勝率 ${fmt(r.winRate, 1)}%`) + tile("已實現", sign(r.realized), "", cls(r.realized));
+    $("#btStats").innerHTML = tile("期末資產", fmt(r.finalEquity), `${r.start} ～ ${r.end}`) + tile("策略報酬", sign(r.returnPct, 2, "%"), "", cls(r.returnPct)) + tile(`${r.benchmark} 同期`, sign(r.benchmarkReturnPct, 2, "%"), "買進持有", cls(r.benchmarkReturnPct)) + tile("最大回撤", "-" + fmt(r.maxDrawdownPct, 2) + "%", "", "down") + tile("交易次數", r.trades, `賣出 ${r.sells} 筆，勝率 ${fmt(r.winRate, 1)}%`) + tile("已實現", sign(r.realized), "", cls(r.realized)) + (r.margin ? tile("融資", `斷頭 ${r.margin.forcedSells} 次`, `追繳 ${r.margin.marginCallDays} 天，利息 ${fmt(r.margin.interestPaid)}，最高融資 ${fmt(r.margin.maxLoan)}`, r.margin.forcedSells ? "alert" : "") : "");
     Chart.line($("#btChart"), { x: r.curve.map((p) => p.date.slice(r.start?.slice(0, 4) === r.end?.slice(0, 4) ? 5 : 2)), series: [{ name: "策略", values: r.curve.map((p) => p.total), color: CSS("--s1") }, { name: r.benchmark + " 買進持有", values: r.curve.map((p) => p.benchmark), color: CSS("--muted"), width: 1.5, dashed: true }], baseline: r.initialCash });
     $("#btTrades tbody").innerHTML = r.tradeLog.slice(0, 80).map((t) => `<tr><td>${t.t}</td><td>${t.symbol}</td><td>${pill(t.side)}</td><td class="num">${fmt(t.shares)}</td><td class="num">${fmt(t.price, 2)}</td><td class="num ${cls(t.realized)}">${t.side === "SELL" ? sign(t.realized) : ""}</td><td class="wrap">${esc(t.reason)}</td></tr>`).join("") || '<tr><td colspan="7" class="muted">期間內沒有交易</td></tr>';
     toast("回測完成");
