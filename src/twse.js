@@ -289,13 +289,34 @@ export async function getMargin(symbols) {
 }
 
 // ====================== 基本面 ======================
+/**
+ * 本益比／淨值比／殖利率。先走 openapi（整份一次拿），雲端機房常連不到 openapi 時，
+ * 退回 www.twse.com.tw 的 BWIBBU_d 與櫃買 peQryDate（最近一個交易日，往前最多找 6 天）。
+ */
 export async function getValuation(symbols) {
   let rows = await readCache("valuation", 6 * 60 * 60 * 1000);
   if (!rows) {
     rows = {};
-    try { const j = await fetchJson("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_d"); for (const r of j) rows[r.Code] = { pe: num(r.PEratio), pb: num(r.PBratio), yield: num(r.DividendYield), date: r.Date }; } catch (e) { console.warn("[twse] BWIBBU_d failed:", e.message); }
-    try { const j = await fetchJson("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"); for (const r of j) rows[r.SecuritiesCompanyCode] = { pe: num(r.PriceEarningRatio), pb: num(r.PriceBookRatio), yield: num(r.YieldRatio), dps: num(r.DividendPerShare), date: r.Date }; } catch (e) { console.warn("[twse] tpex peratio failed:", e.message); }
-    if (Object.keys(rows).length) await writeCache("valuation", rows);
+    let tse = 0, otc = 0;
+    try { const j = await fetchJson("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_d"); for (const r of j) { rows[r.Code] = { pe: num(r.PEratio), pb: num(r.PBratio), yield: num(r.DividendYield), date: r.Date }; tse++; } } catch (e) { console.warn("[twse] BWIBBU_d openapi failed:", e.message); }
+    try { const j = await fetchJson("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"); for (const r of j) { rows[r.SecuritiesCompanyCode] = { pe: num(r.PriceEarningRatio), pb: num(r.PriceBookRatio), yield: num(r.YieldRatio), dps: num(r.DividendPerShare), date: r.Date }; otc++; } } catch (e) { console.warn("[twse] tpex peratio openapi failed:", e.message); }
+    if (!tse || !otc) {
+      const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei" }));
+      if (d.getHours() < 16) d.setDate(d.getDate() - 1);
+      for (let k = 0; k < 6 && (!tse || !otc); k++, d.setDate(d.getDate() - 1)) {
+        if (d.getDay() === 0 || d.getDay() === 6) continue;
+        const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+        if (!tse) {
+          try { const j = await fetchJson(`https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU_d?date=${ymd}&selectType=ALL&response=json`); if (j.stat === "OK") for (const r of j.data || []) { rows[r[0]] = { pe: num(r[5]), pb: num(r[6]), yield: num(r[3]), date: ymd }; tse++; } } catch (e) { console.warn("[twse] BWIBBU_d www failed:", e.message); }
+          await sleep(300);
+        }
+        if (!otc) {
+          try { const j = await fetchJson(`https://www.tpex.org.tw/www/zh-tw/afterTrading/peQryDate?date=${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}&response=json`); for (const r of j.tables?.[0]?.data || []) { rows[String(r[0]).trim()] = { pe: num(r[2]), pb: num(r[6]), yield: num(r[5]), dps: num(r[3]), date: ymd }; otc++; } } catch (e) { console.warn("[twse] tpex peQryDate failed:", e.message); }
+          await sleep(300);
+        }
+      }
+    }
+    if (tse && otc) await writeCache("valuation", rows); // 兩邊都齊才快取，缺一邊下次再試
   }
   return Object.fromEntries(symbols.map((s) => [s, rows[s] || null]));
 }

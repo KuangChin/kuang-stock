@@ -5,7 +5,7 @@ import { runCycle, symbolDetail, autoTick } from "./engine.js";
 import { runBacktest, normalizeRange } from "./backtest.js";
 import { runRadar } from "./radar.js";
 import { tuneRisk } from "./tuner.js";
-import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow, getListing } from "./twse.js";
+import { getQuotes, getIndexQuotes, searchStocks, isMarketOpen, taipeiNow, getListing, getValuation } from "./twse.js";
 import { executeOrder, valuation, marginRatio } from "./portfolio.js";
 import { aiAvailable } from "./analyst.js";
 import { chatStream, CHAT_MAX } from "./chat.js";
@@ -103,7 +103,7 @@ export const routes = {
     return r;
   },
   // 排程密鑰可讀最近的系統日誌（排錯用）
-  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
+  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { valuationSample: await getValuation(["2317", "6442"]).catch((e) => ({ error: e.message })), radarPe: (st.radar?.items || []).slice(0, 5).map((x) => [x.symbol, x.pe ?? null]), log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
   // 飆股雷達：掃全市場找有飆股訊號的股票，投資長挑選。頁面載入時若超過 20 小時沒掃會自動觸發；排程也可叫（收盤後）
   "GET /api/radar": async () => ({ radar: getState().radar || null }),
   "POST /api/radar": async (u, body, ctx) => {
