@@ -103,7 +103,7 @@ export const routes = {
     return r;
   },
   // 排程密鑰可讀最近的系統日誌（排錯用）
-  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { valuationSample: await getValuation(["2317", "6442"]).catch((e) => ({ error: e.message })), radarPe: (st.radar?.items || []).slice(0, 5).map((x) => [x.symbol, x.pe ?? null]), log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
+  "GET /api/log": async (u, body, ctx) => { if (!ctx.cron) throw new HttpError(403, "需要排程密鑰"); const st = getState(); return { valuationSample: await getValuation(["2317", "6442"]).catch((e) => ({ error: e.message })), radarPe: (st.radar?.items || []).slice(0, 5).map((x) => [x.symbol, x.pe ?? null]), cyclePe: Object.values(st.lastCycle?.analyses || {}).slice(0, 6).map((a) => [a.symbol, a.valuation?.pe ?? null]), log: (st.log || []).slice(0, Number(u.searchParams.get("n") || 30)), risk: st.config.risk, auto: st.config.auto, lastDecisions: (st.lastCycle?.decisions || []).map((d) => `${d.symbol} ${d.action}${d.shares ? " " + d.shares : ""}：${d.reason}`) }; },
   // 飆股雷達：掃全市場找有飆股訊號的股票，投資長挑選。頁面載入時若超過 20 小時沒掃會自動觸發；排程也可叫（收盤後）
   "GET /api/radar": async () => ({ radar: getState().radar || null }),
   "POST /api/radar": async (u, body, ctx) => {
