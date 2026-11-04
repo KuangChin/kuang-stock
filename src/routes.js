@@ -119,8 +119,8 @@ export const routes = {
         }
         s.chat.push({ role: "assistant", content: text, t: new Date().toISOString(), model: meta?.model, usage: meta?.usage && { in: meta.usage.input_tokens, out: meta.usage.output_tokens, cached: meta.usage.cache_read_input_tokens } });
         if (s.chat.length > CHAT_MAX * 2) s.chat.splice(0, s.chat.length - CHAT_MAX * 2);
-        await saveState(["chat"]);
-        yield { done: true, usage: meta?.usage, model: meta?.model };
+        await saveState(["chat", ...(meta?.changed || [])]);
+        yield { done: true, usage: meta?.usage, model: meta?.model, refresh: Boolean(meta?.changed?.length) };
       } catch (e) {
         s.chat.pop(); // 失敗就不留這則提問
         await saveState(["chat"]).catch(() => {});

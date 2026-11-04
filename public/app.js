@@ -280,7 +280,7 @@ $("#chatForm").onsubmit = async (e) => {
         const ev = JSON.parse(line.slice(5));
         if (ev.delta) { acc += ev.delta; bubble.innerHTML = md(acc); chatLog.scrollTop = chatLog.scrollHeight; }
         else if (ev.error) throw new Error(ev.error);
-        else if (ev.done) { bubble.innerHTML = md(acc); const m = document.createElement("span"); m.className = "meta"; m.textContent = chatMeta({ t: new Date().toISOString(), usage: ev.usage && { in: ev.usage.input_tokens, out: ev.usage.output_tokens, cached: ev.usage.cache_read_input_tokens } }); bubble.appendChild(m); }
+        else if (ev.done) { bubble.innerHTML = md(acc); const m = document.createElement("span"); m.className = "meta"; m.textContent = chatMeta({ t: new Date().toISOString(), usage: ev.usage && { in: ev.usage.input_tokens, out: ev.usage.output_tokens, cached: ev.usage.cache_read_input_tokens } }); bubble.appendChild(m); if (ev.refresh) refresh().catch(() => {}); }
       }
     }
     if (!acc) throw new Error("沒有收到回覆");

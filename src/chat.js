@@ -2,7 +2,8 @@
 // 背景放在 system 並設 cache_control，同一輪分析內多次對話只付一次完整輸入費。
 import { loadEnv } from "./env.js";
 import { valuation } from "./portfolio.js";
-import { taipeiNow, isMarketOpen } from "./twse.js";
+import { taipeiNow, isMarketOpen, searchStocks } from "./twse.js";
+import { addLog } from "./store.js";
 import { getTaifex } from "./taifex.js";
 import { getGlobalMarkets } from "./yahoo.js";
 
@@ -14,6 +15,7 @@ const SYSTEM = `你是「投資長」，主持一個台股模擬交易帳戶的�
 1. 回答依據背景資料裡的分析、持股、新聞與風控參數；資料沒有的事要明說「資料裡沒有」，不要編造數字。
 2. 用繁體中文、台灣用語，口吻像一位務實的投資長：直接、具體、講理由，不說教，不免責聲明連篇。
 3. 這是模擬帳戶，你不能直接下單；若建議操作，說清楚標的、方向、股數或比例、觸發條件，請對方在頁面按「分析並模擬下單」或手動下單。
+   你可以用工具修改「追蹤清單」（add_watchlist / remove_watchlist）；對方給的是名稱時先用 search_stock 查到正確代碼再加，加完用一句話回報加了哪些、現在清單有哪些。追蹤清單的股票會在下一輪分析納入。
 4. 回答長度看問題：閒聊或簡單問題兩三句就好；分析類問題用短段落或條列，不要超過 300 字，除非對方要求詳細。
 5. 可以表達不同意委員會先前的結論，但要說明新理由。
 6. 停損、停利等風控數字一律以背景資料「風控」那一行為準（那是帳戶主人自己設的），不要引用其他比例；「保留現金」是現金比例，不是停損。`;
@@ -80,6 +82,37 @@ export async function buildLiveBlock() {
   return L.join("\n");
 }
 
+// ---------- 投資長可用的工具 ----------
+const TOOLS = [
+  { name: "search_stock", description: "用代碼或名稱搜尋台股上市／上櫃股票，回傳代碼、名稱、市場。要把股票加入追蹤前，先用它確認代碼。", input_schema: { type: "object", properties: { query: { type: "string", description: "股票代碼開頭或名稱關鍵字，例如 2330 或 台積" } }, required: ["query"] } },
+  { name: "add_watchlist", description: "把股票加入追蹤清單，之後每輪分析都會納入。symbols 給 4～6 位數代碼。", input_schema: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } }, required: ["symbols"] } },
+  { name: "remove_watchlist", description: "把股票從追蹤清單移除（不影響持股）。", input_schema: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } }, required: ["symbols"] } },
+];
+async function runTool(name, input, state, changed) {
+  const wl = state.config.watchlist;
+  if (name === "search_stock") return { results: await searchStocks(String(input.query || ""), 10) };
+  const syms = [...new Set((input.symbols || []).map((x) => String(x).trim()).filter((x) => /^\d{4,6}$/.test(x)))];
+  if (!syms.length) return { error: "沒有有效的股票代碼" };
+  if (name === "add_watchlist") {
+    const added = [], unknown = [], exists = [];
+    for (const s of syms) {
+      if (wl.includes(s)) { exists.push(s); continue; }
+      const hit = (await searchStocks(s, 5)).find((r) => r.code === s);
+      if (!hit) { unknown.push(s); continue; }
+      wl.push(s); added.push(`${s} ${hit.name}`);
+    }
+    if (added.length) { changed.add("config"); changed.add("log"); addLog(`投資長新增追蹤：${added.join("、")}`); }
+    return { added, alreadyExists: exists, notFound: unknown, watchlist: [...wl] };
+  }
+  if (name === "remove_watchlist") {
+    const removed = syms.filter((s) => wl.includes(s));
+    state.config.watchlist = wl.filter((s) => !removed.includes(s));
+    if (removed.length) { changed.add("config"); changed.add("log"); addLog(`投資長移除追蹤：${removed.join("、")}`); }
+    return { removed, watchlist: [...state.config.watchlist] };
+  }
+  return { error: "未知的工具 " + name };
+}
+
 /**
  * 串流回答。history：[{role, content}]（最後一則是使用者）。
  * yield 文字片段；結束時 return { usage, stop_reason, text }。
@@ -92,22 +125,31 @@ export async function* chatStream({ state, history, model = "claude-opus-5-5", e
   const context = buildContext(state);
   const live = await buildLiveBlock();
   const messages = history.map((m) => ({ role: m.role, content: m.content }));
-  const stream = client.messages.stream({
-    model,
-    max_tokens: 8000,
-    system: [
-      { type: "text", text: SYSTEM },
-      { type: "text", text: "# 背景資料（最近一輪分析）\n" + context, cache_control: { type: "ephemeral" } },
-      { type: "text", text: live + "\n\n即時資料比背景資料新；兩者衝突時以即時資料為準，並提醒對方背景分析是哪個時間點做的。" },
-    ],
-    messages,
-    output_config: { effort },
-  });
-  let text = "";
-  for await (const ev of stream) {
-    if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") { text += ev.delta.text; yield ev.delta.text; }
+  const system = [
+    { type: "text", text: SYSTEM },
+    { type: "text", text: "# 背景資料（最近一輪分析）\n" + context, cache_control: { type: "ephemeral" } },
+    { type: "text", text: live + "\n\n即時資料比背景資料新；兩者衝突時以即時資料為準，並提醒對方背景分析是哪個時間點做的。" },
+  ];
+  let text = "", final = null;
+  const changed = new Set();
+  for (let round = 0; round < 6; round++) {
+    const stream = client.messages.stream({ model, max_tokens: 8000, system, tools: TOOLS, messages, output_config: { effort } });
+    for await (const ev of stream) {
+      if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") { text += ev.delta.text; yield ev.delta.text; }
+    }
+    final = await stream.finalMessage();
+    if (final.stop_reason === "refusal") throw new Error("模型拒絕回答：" + (final.stop_details?.explanation || ""));
+    if (final.stop_reason !== "tool_use") break;
+    const uses = final.content.filter((b) => b.type === "tool_use");
+    messages.push({ role: "assistant", content: final.content });
+    const results = [];
+    for (const u of uses) {
+      let out;
+      try { out = await runTool(u.name, u.input, state, changed); } catch (e) { out = { error: e.message }; }
+      results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(out) });
+    }
+    messages.push({ role: "user", content: results });
+    if (text && !text.endsWith("\n")) { text += "\n\n"; yield "\n\n"; }
   }
-  const final = await stream.finalMessage();
-  if (final.stop_reason === "refusal") throw new Error("模型拒絕回答：" + (final.stop_details?.explanation || ""));
-  return { usage: final.usage, stop_reason: final.stop_reason, text, model: final.model };
+  return { usage: final.usage, stop_reason: final.stop_reason, text, model: final.model, changed: [...changed] };
 }
