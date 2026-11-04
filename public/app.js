@@ -166,6 +166,7 @@ let sugT = null;
 $("#watchInput").oninput = (e) => { clearTimeout(sugT); const q = e.target.value.trim(); if (!q) return ($("#watchSuggest").innerHTML = ""); sugT = setTimeout(async () => { const list = await api(`/api/search?q=${encodeURIComponent(q)}`); $("#watchSuggest").innerHTML = list.map((s) => `<div data-add="${s.code}">${s.code} ${esc(s.name)} <span class="muted small">${s.market}</span></div>`).join(""); }, 250); };
 $("#watchSuggest").onclick = (e) => { const c = e.target.closest("[data-add]")?.dataset.add; if (c) { if (!watch.includes(c)) watch.push(c); drawChips(); $("#watchSuggest").innerHTML = ""; $("#watchInput").value = ""; } };
 $("#btnTune").onclick = async () => {
+  if (!confirm("自動調參會用回測結果覆蓋：停損、停利、買進／賣出門檻、每筆買進比例、單一持股上限、冷卻天數（你手動設定的停損會被改掉）。確定要執行？")) return;
   const b = $("#btnTune"); b.disabled = true; $("#tuneResult").textContent = "回測中，約 10～60 秒…";
   try {
     const r = await api("/api/tune", { apply: true });
