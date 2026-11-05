@@ -183,10 +183,21 @@ export async function putSourceItems(items, config) {
 // ---------- Claude 整理 ----------
 const Stance = z.enum(["bullish", "bearish", "neutral"]);
 const SummarySchema = z.object({
-  market: z.object({ score: z.number().min(-2).max(2), stance: Stance, points: z.array(z.string()).max(5).describe("各位老師對大盤的看法，每點 40 字內，註明是誰說的") }),
-  items: z.array(z.object({ id: z.string(), stance: Stance, summary: z.string().describe("這一集的重點 60 字內（繁體中文）"), stocks: z.array(z.object({ symbol: z.string().describe("4-6 位數代碼，不確定就留空字串"), name: z.string(), stance: Stance, note: z.string().describe("老師怎麼說，30 字內") })).max(12) })),
-  symbols: z.array(z.object({ symbol: z.string(), score: z.number().min(-2).max(2), confidence: z.number().min(0).max(1), points: z.array(z.string()).max(4).describe("每點註明哪位老師、哪一集（日期）") })).describe("只列追蹤清單裡有被提到的標的"),
+  // 陣列長度不用 zod 硬限（API 不保證遵守，超過會整份解析失敗），寫在 describe 裡提醒模型，程式端再截斷
+  market: z.object({ score: z.number().min(-2).max(2), stance: Stance, points: z.array(z.string()).describe("各位老師對大盤的看法，最多 5 點，每點 40 字內，註明是誰說的") }),
+  items: z.array(z.object({ id: z.string(), stance: Stance, summary: z.string().describe("這一集的重點 60 字內（繁體中文）"), stocks: z.array(z.object({ symbol: z.string().describe("4-6 位數代碼，不確定就留空字串"), name: z.string(), stance: Stance, note: z.string().describe("老師怎麼說，30 字內") })).describe("這集提到的個股，最多 12 檔，挑老師講得最具體的") })),
+  symbols: z.array(z.object({ symbol: z.string(), score: z.number().min(-2).max(2), confidence: z.number().min(0).max(1), points: z.array(z.string()).describe("最多 4 點，每點註明哪位老師、哪一集（日期）") })).describe("只列追蹤清單裡有被提到的標的"),
 });
+const clampScore = (x) => Math.max(-2, Math.min(2, Number(x) || 0));
+/** 把模型回的結果修整到合理長度（陣列截斷、分數夾在範圍內） */
+function tidySummary(p) {
+  const market = p.market || { score: 0, stance: "neutral", points: [] };
+  return {
+    market: { ...market, score: clampScore(market.score), points: (market.points || []).slice(0, 5) },
+    items: (p.items || []).map((it) => ({ ...it, stocks: (it.stocks || []).slice(0, 12) })),
+    symbols: (p.symbols || []).map((x) => ({ ...x, score: clampScore(x.score), confidence: Math.max(0, Math.min(1, Number(x.confidence) || 0)), points: (x.points || []).slice(0, 4) })),
+  };
+}
 
 function hashOf(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return (h >>> 0).toString(36); }
 
@@ -211,7 +222,8 @@ async function summarize(items, symbols, names, { model, effort }) {
     messages: [{ role: "user", content: L.join("\n") }],
   });
   if (res.stop_reason === "refusal") throw new Error("模型拒絕整理投顧內容");
-  return { ...res.parsed_output, model: res.model, usage: res.usage };
+  if (res.stop_reason === "max_tokens") throw new Error("投顧整理輸出被截斷（max_tokens）");
+  return { ...tidySummary(res.parsed_output || {}), model: res.model, usage: res.usage };
 }
 
 /** 個股明細用：只讀最近一次整理好的結果，不另外叫 Claude（開新股票不用等 30 秒） */
